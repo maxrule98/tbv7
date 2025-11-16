@@ -1,9 +1,0 @@
-{
-  "testnet": true,
-  "apiKey": "${BINANCE_API_KEY}",
-  "secret": "${BINANCE_API_SECRET}",
-  "password": null,
-  "options": {
-    "adjustForTimeDifference": true
-  }
-}

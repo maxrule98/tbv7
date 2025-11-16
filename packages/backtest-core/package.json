@@ -1,12 +1,12 @@
 {
   "name": "@agenai/backtest-core",
-  "version": "1.0.0",
-  "main": "src/index.ts",
-  "types": "src/index.ts",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "ts-node src/index.ts",
-    "lint": "eslint 'src/**/*.{ts,tsx}' --max-warnings=0 || true",
+    "lint": "eslint 'src/**/*.ts'",
     "test": "vitest run"
   }
 }
