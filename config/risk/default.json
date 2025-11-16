@@ -1,0 +1,7 @@
+{
+  "maxLeverage": 5,
+  "riskPerTradePct": 0.5,
+  "maxPositions": 1,
+  "slPct": 1.0,
+  "tpPct": 2.0
+}

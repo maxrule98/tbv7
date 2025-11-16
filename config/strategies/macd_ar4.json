@@ -1,0 +1,14 @@
+{
+  "symbol": "BTC/USDT",
+  "timeframe": "1m",
+  "indicators": {
+    "emaFast": 12,
+    "emaSlow": 26,
+    "signal": 9
+  },
+  "thresholds": {
+    "macdCrossUp": true,
+    "ar4ForecastMin": 0
+  },
+  "mode": "long-only"
+}
