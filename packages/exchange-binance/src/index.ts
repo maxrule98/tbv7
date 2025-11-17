@@ -51,6 +51,10 @@ export class BinanceClient {
     return candles.map(BinanceClient.mapCandle);
   }
 
+  async createMarketOrder(symbol: string, side: 'buy' | 'sell', quantity: number): Promise<void> {
+    await this.exchange.createOrder(symbol, 'market', side, quantity);
+  }
+
   private static mapCandle(candle: OHLCV): ExchangeCandle {
     const [timestamp, open, high, low, close, volume] = candle;
 

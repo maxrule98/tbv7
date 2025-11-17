@@ -7,6 +7,8 @@
   "dependencies": {
     "@agenai/core": "workspace:*",
     "@agenai/exchange-binance": "workspace:*",
+    "@agenai/risk-engine": "workspace:*",
+    "@agenai/execution-engine": "workspace:*",
     "@agenai/strategy-engine": "workspace:*"
   },
   "scripts": {

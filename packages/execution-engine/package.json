@@ -5,7 +5,8 @@
   "types": "dist/index.d.ts",
   "dependencies": {
     "@agenai/core": "workspace:*",
-    "@agenai/exchange-binance": "workspace:*"
+    "@agenai/exchange-binance": "workspace:*",
+    "@agenai/risk-engine": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

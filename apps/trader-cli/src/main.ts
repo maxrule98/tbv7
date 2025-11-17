@@ -1,5 +1,7 @@
 import { Candle, TradeIntent, loadAgenaiConfig } from '@agenai/core';
 import { BinanceClient } from '@agenai/exchange-binance';
+import { ExecutionEngine } from '@agenai/execution-engine';
+import { RiskManager, TradePlan } from '@agenai/risk-engine';
 import { MacdAr4Strategy } from '@agenai/strategy-engine';
 
 const POLL_INTERVAL_MS = 10_000;
@@ -24,6 +26,13 @@ const main = async (): Promise<void> => {
     arWindow: 20,
     minForecast: 0
   });
+  const riskManager = new RiskManager({
+    riskPerTradePct: config.risk.riskPerTradePct,
+    slPct: config.risk.slPct,
+    tpPct: config.risk.tpPct
+  });
+  const executionEngine = new ExecutionEngine(client);
+  const simulatedEquity = 100;
 
   console.info('AgenAI Trader CLI started');
   console.info(JSON.stringify({ symbol, timeframe, useTestnet: exchange.testnet }));
@@ -31,12 +40,25 @@ const main = async (): Promise<void> => {
   const candlesBySymbol = new Map<string, Candle[]>();
   const lastTimestampBySymbol = new Map<string, number>();
 
-  await startPolling(client, strategy, symbol, timeframe, candlesBySymbol, lastTimestampBySymbol);
+  await startPolling(
+    client,
+    strategy,
+    riskManager,
+    executionEngine,
+    simulatedEquity,
+    symbol,
+    timeframe,
+    candlesBySymbol,
+    lastTimestampBySymbol
+  );
 };
 
 const startPolling = async (
   client: BinanceClient,
   strategy: MacdAr4Strategy,
+  riskManager: RiskManager,
+  executionEngine: ExecutionEngine,
+  equity: number,
   symbol: string,
   timeframe: string,
   candlesBySymbol: Map<string, Candle[]>,
@@ -70,6 +92,13 @@ const startPolling = async (
 
           const intent = strategy.decide(buffer);
           logStrategyDecision(latest, intent);
+          if (intent.intent === 'OPEN_LONG' || intent.intent === 'CLOSE_LONG') {
+            const plan = riskManager.plan(intent, latest.close, equity);
+            if (plan) {
+              logTradePlan(plan, latest);
+              await executionEngine.execute(plan);
+            }
+          }
         } else {
           console.info('No new candle yet for', symbol);
         }
@@ -115,6 +144,21 @@ const logStrategyDecision = (candle: Candle, intent: TradeIntent): void => {
       close: candle.close,
       intent: intent.intent,
       reason: intent.reason
+    })
+  );
+};
+
+const logTradePlan = (plan: TradePlan, candle: Candle): void => {
+  console.log(
+    JSON.stringify({
+      event: 'trade_plan',
+      symbol: plan.symbol,
+      timestamp: new Date(candle.timestamp).toISOString(),
+      intent: plan.reason,
+      side: plan.side,
+      quantity: plan.quantity,
+      stopLossPrice: plan.stopLossPrice,
+      takeProfitPrice: plan.takeProfitPrice
     })
   );
 };

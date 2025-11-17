@@ -43,6 +43,12 @@ importers:
       '@agenai/exchange-binance':
         specifier: workspace:*
         version: link:../../packages/exchange-binance
+      '@agenai/execution-engine':
+        specifier: workspace:*
+        version: link:../../packages/execution-engine
+      '@agenai/risk-engine':
+        specifier: workspace:*
+        version: link:../../packages/risk-engine
       '@agenai/strategy-engine':
         specifier: workspace:*
         version: link:../../packages/strategy-engine
@@ -72,6 +78,9 @@ importers:
       '@agenai/exchange-binance':
         specifier: workspace:*
         version: link:../exchange-binance
+      '@agenai/risk-engine':
+        specifier: workspace:*
+        version: link:../risk-engine
 
   packages/indicators: {}
 
@@ -79,7 +88,11 @@ importers:
 
   packages/persistence: {}
 
-  packages/risk-engine: {}
+  packages/risk-engine:
+    dependencies:
+      '@agenai/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/strategy-engine:
     dependencies:
