@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import dotenv from 'dotenv';
 
-const DEFAULT_ENV_PATH = path.resolve(process.cwd(), '.env');
-const DEFAULT_CONFIG_DIR = path.resolve(process.cwd(), 'config');
-
 let envLoaded = false;
+let loadedEnvPath: string | undefined;
+let cachedWorkspaceRoot: string | undefined;
+
+const WORKSPACE_SENTINELS = ['pnpm-workspace.yaml', '.git'];
 
 interface ExchangeConfigFile {
   exchange: string;
@@ -65,6 +66,31 @@ export interface ConfigLoadOptions {
   riskProfile?: string;
 }
 
+const findWorkspaceRoot = (): string => {
+  if (cachedWorkspaceRoot) {
+    return cachedWorkspaceRoot;
+  }
+
+  let current = process.cwd();
+
+  while (true) {
+    if (WORKSPACE_SENTINELS.some((file) => fs.existsSync(path.join(current, file)))) {
+      cachedWorkspaceRoot = current;
+      return current;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      cachedWorkspaceRoot = current;
+      return current;
+    }
+    current = parent;
+  }
+};
+
+const getDefaultEnvPath = (): string => path.join(findWorkspaceRoot(), '.env');
+const getDefaultConfigDir = (): string => path.join(findWorkspaceRoot(), 'config');
+
 const getEnvVar = (key: string, fallback?: string): string => {
   const value = process.env[key];
   if (value !== undefined && value !== '') {
@@ -88,10 +114,11 @@ const readJsonFile = <T>(filePath: string): T => {
   return JSON.parse(contents) as T;
 };
 
-export const loadEnvConfig = (envPath = DEFAULT_ENV_PATH): EnvConfig => {
-  if (!envLoaded) {
+export const loadEnvConfig = (envPath = getDefaultEnvPath()): EnvConfig => {
+  if (!envLoaded || loadedEnvPath !== envPath) {
     dotenv.config({ path: envPath });
     envLoaded = true;
+    loadedEnvPath = envPath;
   }
 
   return {
@@ -105,7 +132,7 @@ export const loadEnvConfig = (envPath = DEFAULT_ENV_PATH): EnvConfig => {
 
 export const loadExchangeConfig = (
   env: EnvConfig,
-  configDir = DEFAULT_CONFIG_DIR,
+  configDir = getDefaultConfigDir(),
   exchangeProfile = 'binance.testnet'
 ): ExchangeConfig => {
   const exchangePath = path.join(configDir, 'exchange', `${exchangeProfile}.json`);
@@ -122,7 +149,7 @@ export const loadExchangeConfig = (
 };
 
 export const loadStrategyConfig = (
-  configDir = DEFAULT_CONFIG_DIR,
+  configDir = getDefaultConfigDir(),
   strategyProfile = 'macd_ar4'
 ): StrategyConfig => {
   const strategyPath = path.join(configDir, 'strategies', `${strategyProfile}.json`);
@@ -130,7 +157,7 @@ export const loadStrategyConfig = (
 };
 
 export const loadRiskConfig = (
-  configDir = DEFAULT_CONFIG_DIR,
+  configDir = getDefaultConfigDir(),
   riskProfile = 'default'
 ): RiskConfig => {
   const riskPath = path.join(configDir, 'risk', `${riskProfile}.json`);
@@ -138,8 +165,10 @@ export const loadRiskConfig = (
 };
 
 export const loadAgenaiConfig = (options: ConfigLoadOptions = {}): AgenaiConfig => {
-  const env = loadEnvConfig(options.envPath ?? DEFAULT_ENV_PATH);
-  const configDir = options.configDir ?? DEFAULT_CONFIG_DIR;
+  const workspaceRoot = findWorkspaceRoot();
+  const envPath = options.envPath ?? path.join(workspaceRoot, '.env');
+  const configDir = options.configDir ?? path.join(workspaceRoot, 'config');
+  const env = loadEnvConfig(envPath);
   return {
     env,
     exchange: loadExchangeConfig(env, configDir, options.exchangeProfile),

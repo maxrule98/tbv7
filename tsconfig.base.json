@@ -8,12 +8,8 @@
     "strict": true,
     "skipLibCheck": true,
     "declaration": true,
-    "outDir": "dist",
-    "rootDir": "src",
     "resolveJsonModule": true,
     "types": ["node"],
     "baseUrl": "."
-  },
-  "include": ["packages", "apps"],
-  "exclude": ["node_modules", "dist"]
+  }
 }
