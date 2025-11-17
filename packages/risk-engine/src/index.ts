@@ -19,20 +19,27 @@ export interface RiskConfig {
 
 export class RiskManager {
   private readonly minNotional: number;
+  private readonly minQuantity = 0.001; // TODO: fetch from exchange limits when exchange metadata is wired in.
 
   constructor(private readonly config: RiskConfig) {
     this.minNotional = config.minNotional ?? 50;
   }
 
-  plan(intent: TradeIntent, lastPrice: number, equity: number): TradePlan | null {
+  plan(
+    intent: TradeIntent,
+    lastPrice: number,
+    equity: number,
+    currentPositionQuantity = 0
+  ): TradePlan | null {
     if (intent.intent === 'NO_ACTION') {
       return null;
     }
 
     const notional = Math.max((equity * this.config.riskPerTradePct) / 100, this.minNotional);
-    const quantity = parseFloat((notional / lastPrice).toFixed(4));
+    const computedQuantity = parseFloat((notional / lastPrice).toFixed(4));
 
     if (intent.intent === 'OPEN_LONG') {
+      const quantity = this.ensureMinQuantity(computedQuantity);
       return {
         symbol: intent.symbol,
         side: 'buy',
@@ -45,6 +52,9 @@ export class RiskManager {
     }
 
     if (intent.intent === 'CLOSE_LONG') {
+      const quantity = this.ensureMinQuantity(
+        currentPositionQuantity > 0 ? currentPositionQuantity : computedQuantity
+      );
       return {
         symbol: intent.symbol,
         side: 'sell',
@@ -65,5 +75,9 @@ export class RiskManager {
 
   private calculateTakeProfit(price: number): number {
     return parseFloat((price * (1 + this.config.tpPct / 100)).toFixed(2));
+  }
+
+  private ensureMinQuantity(quantity: number): number {
+    return quantity < this.minQuantity ? this.minQuantity : quantity;
   }
 }

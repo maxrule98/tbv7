@@ -1,6 +1,6 @@
-import { Candle, TradeIntent, loadAgenaiConfig } from '@agenai/core';
+import { Candle, PositionSide, TradeIntent, loadAgenaiConfig } from '@agenai/core';
 import { BinanceClient } from '@agenai/exchange-binance';
-import { ExecutionEngine } from '@agenai/execution-engine';
+import { ExecutionEngine, ExecutionResult } from '@agenai/execution-engine';
 import { RiskManager, TradePlan } from '@agenai/risk-engine';
 import { MacdAr4Strategy } from '@agenai/strategy-engine';
 
@@ -39,6 +39,8 @@ const main = async (): Promise<void> => {
 
   const candlesBySymbol = new Map<string, Candle[]>();
   const lastTimestampBySymbol = new Map<string, number>();
+  const positionBySymbol = new Map<string, PositionState>();
+  positionBySymbol.set(symbol, { side: 'FLAT', quantity: 0 });
 
   await startPolling(
     client,
@@ -46,6 +48,7 @@ const main = async (): Promise<void> => {
     riskManager,
     executionEngine,
     simulatedEquity,
+    positionBySymbol,
     symbol,
     timeframe,
     candlesBySymbol,
@@ -59,12 +62,14 @@ const startPolling = async (
   riskManager: RiskManager,
   executionEngine: ExecutionEngine,
   equity: number,
+  positionBySymbol: Map<string, PositionState>,
   symbol: string,
   timeframe: string,
   candlesBySymbol: Map<string, Candle[]>,
   lastTimestampBySymbol: Map<string, number>
 ): Promise<never> => {
   while (true) {
+    let latest: Candle | undefined;
     try {
       const candles = await client.fetchOHLCV({ symbol, timeframe, limit: 1 });
       const latestRaw = candles[candles.length - 1];
@@ -72,7 +77,7 @@ const startPolling = async (
       if (!latestRaw) {
         console.warn('No candle data returned for', symbol);
       } else {
-        const latest: Candle = {
+        latest = {
           symbol,
           timeframe,
           timestamp: latestRaw.timestamp,
@@ -82,29 +87,45 @@ const startPolling = async (
           close: latestRaw.close,
           volume: latestRaw.volume
         };
-
-        const lastTimestamp = lastTimestampBySymbol.get(symbol);
-
-        if (lastTimestamp !== latest.timestamp) {
-          lastTimestampBySymbol.set(symbol, latest.timestamp);
-          const buffer = appendCandle(candlesBySymbol, latest);
-          logCandle(latest);
-
-          const intent = strategy.decide(buffer);
-          logStrategyDecision(latest, intent);
-          if (intent.intent === 'OPEN_LONG' || intent.intent === 'CLOSE_LONG') {
-            const plan = riskManager.plan(intent, latest.close, equity);
-            if (plan) {
-              logTradePlan(plan, latest);
-              await executionEngine.execute(plan);
-            }
-          }
-        } else {
-          console.info('No new candle yet for', symbol);
-        }
       }
     } catch (error) {
-      console.error('Failed to fetch candles:', error);
+      logMarketDataError(error);
+    }
+
+    if (latest) {
+      const lastTimestamp = lastTimestampBySymbol.get(symbol);
+
+      if (lastTimestamp !== latest.timestamp) {
+        lastTimestampBySymbol.set(symbol, latest.timestamp);
+        const buffer = appendCandle(candlesBySymbol, latest);
+        logCandle(latest);
+
+        const positionState = getPositionState(positionBySymbol, symbol);
+        const intent = strategy.decide(buffer, positionState.side);
+        logStrategyDecision(latest, intent);
+
+        if (intent.intent === 'OPEN_LONG' || intent.intent === 'CLOSE_LONG') {
+          const plan = riskManager.plan(intent, latest.close, equity, positionState.quantity);
+          if (!plan) {
+            continue;
+          }
+
+          if (shouldSkipExecution(plan, positionState)) {
+            logExecutionSkipped(plan, positionState);
+          } else {
+            logTradePlan(plan, latest);
+            try {
+              const result = await executionEngine.execute(plan);
+              logExecutionResult(result);
+              updatePositionState(positionBySymbol, plan);
+            } catch (error) {
+              logExecutionError(error, plan);
+            }
+          }
+        }
+      } else {
+        console.info('No new candle yet for', symbol);
+      }
     }
 
     await delay(POLL_INTERVAL_MS);
@@ -162,6 +183,81 @@ const logTradePlan = (plan: TradePlan, candle: Candle): void => {
     })
   );
 };
+
+const logExecutionResult = (result: ExecutionResult): void => {
+  console.log(
+    JSON.stringify({
+      event: 'execution_result',
+      symbol: result.symbol,
+      side: result.side,
+      quantity: result.quantity,
+      price: result.price,
+      status: result.status
+    })
+  );
+};
+
+const logExecutionError = (error: unknown, plan: TradePlan): void => {
+  console.error(
+    JSON.stringify({
+      event: 'execution_error',
+      symbol: plan.symbol,
+      side: plan.side,
+      quantity: plan.quantity,
+      message: error instanceof Error ? error.message : String(error)
+    })
+  );
+};
+
+const logMarketDataError = (error: unknown): void => {
+  console.error(
+    JSON.stringify({
+      event: 'market_data_error',
+      message: error instanceof Error ? error.message : String(error)
+    })
+  );
+};
+
+const logExecutionSkipped = (plan: TradePlan, positionState: PositionState): void => {
+  console.log(
+    JSON.stringify({
+      event: 'execution_skipped',
+      symbol: plan.symbol,
+      side: plan.side,
+      reason:
+        plan.side === 'buy' && positionState.side === 'LONG'
+          ? 'already_long'
+          : 'already_flat'
+    })
+  );
+};
+
+const getPositionState = (positionBySymbol: Map<string, PositionState>, symbol: string): PositionState =>
+  positionBySymbol.get(symbol) ?? { side: 'FLAT', quantity: 0 };
+
+const updatePositionState = (positionBySymbol: Map<string, PositionState>, plan: TradePlan): void => {
+  if (plan.side === 'buy') {
+    positionBySymbol.set(plan.symbol, { side: 'LONG', quantity: plan.quantity });
+    return;
+  }
+
+  positionBySymbol.set(plan.symbol, { side: 'FLAT', quantity: 0 });
+};
+
+const shouldSkipExecution = (plan: TradePlan, positionState: PositionState): boolean => {
+  if (plan.side === 'buy' && positionState.side === 'LONG') {
+    return true;
+  }
+  if (plan.side === 'sell' && positionState.side === 'FLAT') {
+    return true;
+  }
+  return false;
+};
+
+interface PositionState {
+  side: PositionSide;
+  quantity: number;
+}
 
 const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => {

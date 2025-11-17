@@ -1,5 +1,5 @@
 import ccxt from 'ccxt';
-import type { Exchange, OHLCV } from 'ccxt';
+import type { Exchange, OHLCV, Order } from 'ccxt';
 
 export interface BinanceClientOptions {
   apiKey: string;
@@ -51,8 +51,8 @@ export class BinanceClient {
     return candles.map(BinanceClient.mapCandle);
   }
 
-  async createMarketOrder(symbol: string, side: 'buy' | 'sell', quantity: number): Promise<void> {
-    await this.exchange.createOrder(symbol, 'market', side, quantity);
+  async createMarketOrder(symbol: string, side: 'buy' | 'sell', quantity: number): Promise<Order> {
+    return this.exchange.createOrder(symbol, 'market', side, quantity);
   }
 
   private static mapCandle(candle: OHLCV): ExchangeCandle {
