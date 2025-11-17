@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "dependencies": {
+    "@agenai/core": "workspace:*",
+    "@agenai/indicators": "workspace:*",
+    "@agenai/models-quant": "workspace:*"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "ts-node src/index.ts",

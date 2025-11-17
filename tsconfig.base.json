@@ -10,6 +10,9 @@
     "declaration": true,
     "resolveJsonModule": true,
     "types": ["node"],
-    "baseUrl": "."
+    "baseUrl": ".",
+    "paths": {
+      "@agenai/*": ["packages/*/src"]
+    }
   }
 }

@@ -14,7 +14,7 @@ export interface FetchOHLCVParams {
   limit?: number;
 }
 
-export interface Candle {
+export interface ExchangeCandle {
   timestamp: number;
   open: number;
   high: number;
@@ -40,7 +40,7 @@ export class BinanceClient {
     this.exchange.setSandboxMode(options.useTestnet);
   }
 
-  async fetchOHLCV(params: FetchOHLCVParams): Promise<Candle[]> {
+  async fetchOHLCV(params: FetchOHLCVParams): Promise<ExchangeCandle[]> {
     const candles = await this.exchange.fetchOHLCV(
       params.symbol,
       params.timeframe,
@@ -51,7 +51,7 @@ export class BinanceClient {
     return candles.map(BinanceClient.mapCandle);
   }
 
-  private static mapCandle(candle: OHLCV): Candle {
+  private static mapCandle(candle: OHLCV): ExchangeCandle {
     const [timestamp, open, high, low, close, volume] = candle;
 
     if (

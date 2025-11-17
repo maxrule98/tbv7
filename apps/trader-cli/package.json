@@ -6,11 +6,12 @@
   "types": "dist/main.d.ts",
   "dependencies": {
     "@agenai/core": "workspace:*",
-    "@agenai/exchange-binance": "workspace:*"
+    "@agenai/exchange-binance": "workspace:*",
+    "@agenai/strategy-engine": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "ts-node src/main.ts",
+    "dev": "ts-node --project tsconfig.json --require tsconfig-paths/register src/main.ts",
     "start": "node dist/main.js"
   }
 }
