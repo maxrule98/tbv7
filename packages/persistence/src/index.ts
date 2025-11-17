@@ -3,12 +3,13 @@
  * to allow wiring without picking a database yet.
  */
 export interface PersistenceOptions {
-  driver: 'file' | 'postgres' | 'dynamo';
-  connection?: string;
+	driver: "file" | "postgres" | "dynamo";
+	connection?: string;
 }
 
-export const createPersistenceLayer = (_options: PersistenceOptions) => ({
-  async save(): Promise<void> {
-    // no-op placeholder
-  }
+export const createPersistenceLayer = (options: PersistenceOptions) => ({
+	async save(): Promise<void> {
+		void options;
+		// no-op placeholder
+	},
 });

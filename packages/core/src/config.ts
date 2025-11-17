@@ -73,16 +73,9 @@ const findWorkspaceRoot = (): string => {
 
 	let current = process.cwd();
 
-	while (true) {
-		if (
-			WORKSPACE_SENTINELS.some((file) =>
-				fs.existsSync(path.join(current, file))
-			)
-		) {
-			cachedWorkspaceRoot = current;
-			return current;
-		}
-
+	while (
+		!WORKSPACE_SENTINELS.some((file) => fs.existsSync(path.join(current, file)))
+	) {
 		const parent = path.dirname(current);
 		if (parent === current) {
 			cachedWorkspaceRoot = current;
@@ -90,6 +83,9 @@ const findWorkspaceRoot = (): string => {
 		}
 		current = parent;
 	}
+
+	cachedWorkspaceRoot = current;
+	return current;
 };
 
 const getDefaultEnvPath = (): string => path.join(findWorkspaceRoot(), ".env");
