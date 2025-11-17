@@ -4,9 +4,5 @@
   "testnet": true,
   "restEndpoint": "https://testnet.binancefuture.com",
   "wsEndpoint": "wss://fstream.binancefuture.com/stream",
-  "credentials": {
-    "apiKey": "${BINANCE_API_KEY}",
-    "apiSecret": "${BINANCE_API_SECRET}"
-  },
   "defaultSymbol": "BTC/USDT"
 }

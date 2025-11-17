@@ -8,5 +8,8 @@
     "dev": "ts-node src/index.ts",
     "lint": "eslint 'src/**/*.ts'",
     "test": "vitest run"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
   }
 }

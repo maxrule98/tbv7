@@ -32,17 +32,31 @@ importers:
 
   apps/dashboard: {}
 
-  apps/trader-cli: {}
+  apps/trader-cli:
+    dependencies:
+      '@agenai/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@agenai/exchange-binance':
+        specifier: workspace:*
+        version: link:../../packages/exchange-binance
 
   packages/backtest-core: {}
 
-  packages/core: {}
+  packages/core:
+    dependencies:
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
 
   packages/exchange-binance:
     dependencies:
       '@agenai/core':
         specifier: workspace:*
         version: link:../core
+      ccxt:
+        specifier: ^4.3.81
+        version: 4.5.19
 
   packages/execution-engine:
     dependencies:
@@ -753,6 +767,17 @@ packages:
     engines: {node: '>=6'}
     dev: true
 
+  /ccxt@4.5.19:
+    resolution: {integrity: sha512-CT26t2Ns/vDgcmeBHTPfbZQ9qhZFGhu+vhJmXCyaJ1Jl2+JbQes3cF/of4zUqBMtfNnQb7bZax2Ka0gfWfgO9Q==}
+    engines: {node: '>=15.0.0'}
+    requiresBuild: true
+    dependencies:
+      ws: 8.18.3
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+    dev: false
+
   /chai@4.5.0:
     resolution: {integrity: sha512-RITGBfijLkBddZvnn8jdqoTypxvqbOLYQkGGxXzeFjVHvudaPw0HNFD9x928/eUwYWd2dPCugVqspGALTZZQKw==}
     engines: {node: '>=4'}
@@ -851,6 +876,11 @@ packages:
     dependencies:
       esutils: 2.0.3
     dev: true
+
+  /dotenv@16.6.1:
+    resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
+    engines: {node: '>=12'}
+    dev: false
 
   /esbuild@0.21.5:
     resolution: {integrity: sha512-mg3OPMV4hXywwpoDxu3Qda5xCKQi+vCTZq8S9J/EpkhB2HzKXq4SNFZE3+NK93JYxc8VMSep+lOUSC/RVKaBqw==}
@@ -1791,6 +1821,19 @@ packages:
   /wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
     dev: true
+
+  /ws@8.18.3:
+    resolution: {integrity: sha512-PEIGCY5tSlUt50cqyMXfCzX+oOPqN0vuGqWzbcJ2xvnkzkq46oOpz7dQaTDBdfICb4N14+GARUDw2XV2N4tvzg==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+    dev: false
 
   /yn@3.1.1:
     resolution: {integrity: sha512-Ux4ygGWsu2c7isFWe8Yu1YluJmqVhxqK2cLXNQA5AcC3QfbGNpM7fu0Y8b/z16pXLnFxZYvWhd3fhBY9DLmC6Q==}

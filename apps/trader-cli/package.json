@@ -4,6 +4,10 @@
   "private": true,
   "main": "dist/main.js",
   "types": "dist/main.d.ts",
+  "dependencies": {
+    "@agenai/core": "workspace:*",
+    "@agenai/exchange-binance": "workspace:*"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "ts-node src/main.ts",
