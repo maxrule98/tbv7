@@ -2,6 +2,7 @@ import {
 	Candle,
 	PositionSide,
 	TradeIntent,
+	loadAccountConfig,
 	loadAgenaiConfig,
 } from "@agenai/core";
 import { MexcClient } from "@agenai/exchange-mexc";
@@ -9,6 +10,8 @@ import {
 	ExecutionEngine,
 	ExecutionResult,
 	PaperPositionSnapshot,
+	PaperAccount,
+	PaperAccountSnapshot,
 } from "@agenai/execution-engine";
 import { RiskManager, TradePlan } from "@agenai/risk-engine";
 import { MacdAr4Strategy } from "@agenai/strategy-engine";
@@ -43,11 +46,20 @@ const main = async (): Promise<void> => {
 		slPct: config.risk.slPct,
 		tpPct: config.risk.tpPct,
 	});
+	const accountConfig = loadAccountConfig();
+	const executionMode = config.env.executionMode;
+	const paperAccount =
+		executionMode === "paper"
+			? new PaperAccount(accountConfig.startingBalance)
+			: undefined;
 	const executionEngine = new ExecutionEngine({
 		client,
-		mode: config.env.executionMode,
+		mode: executionMode,
+		paperAccount,
 	});
-	const simulatedEquity = 100;
+	const initialEquity = paperAccount
+		? paperAccount.snapshot(0).equity
+		: accountConfig.startingBalance || 100;
 
 	console.info("AgenAI Trader CLI started");
 	console.info(
@@ -70,7 +82,7 @@ const main = async (): Promise<void> => {
 		strategy,
 		riskManager,
 		executionEngine,
-		simulatedEquity,
+		initialEquity,
 		symbol,
 		timeframe,
 		candlesBySymbol,
@@ -108,12 +120,13 @@ const startPolling = async (
 	strategy: MacdAr4Strategy,
 	riskManager: RiskManager,
 	executionEngine: ExecutionEngine,
-	equity: number,
+	initialEquity: number,
 	symbol: string,
 	timeframe: string,
 	candlesBySymbol: Map<string, Candle[]>,
 	lastTimestampBySymbol: Map<string, number>
 ): Promise<never> => {
+	let equity = initialEquity;
 	while (true) {
 		let latest: Candle | undefined;
 		try {
@@ -180,7 +193,18 @@ const startPolling = async (
 					}
 				}
 
-				logPaperPosition(symbol, executionEngine.getPaperPosition(symbol));
+				const latestPosition = executionEngine.getPaperPosition(symbol);
+				logPaperPosition(symbol, latestPosition);
+
+				const accountSnapshot = snapshotPaperAccount(
+					executionEngine,
+					calculateUnrealizedPnl(latestPosition, latest.close),
+					symbol,
+					latest.timestamp
+				);
+				if (accountSnapshot) {
+					equity = accountSnapshot.equity;
+				}
 			} else {
 				console.info("No new candle yet for", symbol);
 			}
@@ -330,6 +354,47 @@ const logPaperPosition = (
 			realizedPnl: position.realizedPnl,
 		})
 	);
+};
+
+const snapshotPaperAccount = (
+	executionEngine: ExecutionEngine,
+	unrealizedPnl: number,
+	symbol: string,
+	timestamp: number
+): PaperAccountSnapshot | null => {
+	const snapshot = executionEngine.snapshotPaperAccount(unrealizedPnl);
+	if (!snapshot) {
+		return null;
+	}
+
+	logPaperAccountSnapshot(symbol, timestamp, snapshot);
+	return snapshot;
+};
+
+const logPaperAccountSnapshot = (
+	symbol: string,
+	timestamp: number,
+	snapshot: PaperAccountSnapshot
+): void => {
+	console.log(
+		JSON.stringify({
+			event: "paper_account_snapshot",
+			symbol,
+			timestamp: new Date(timestamp).toISOString(),
+			snapshot,
+		})
+	);
+};
+
+const calculateUnrealizedPnl = (
+	position: PaperPositionSnapshot,
+	price: number
+): number => {
+	if (position.side !== "LONG" || position.avgEntryPrice === null) {
+		return 0;
+	}
+
+	return (price - position.avgEntryPrice) * position.size;
 };
 
 const delay = (ms: number): Promise<void> =>

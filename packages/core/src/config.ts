@@ -33,6 +33,10 @@ interface RiskConfigFile {
 	tpPct: number;
 }
 
+interface AccountConfigFile {
+	startingBalance: number;
+}
+
 export type ExecutionMode = "paper" | "live";
 
 export interface EnvConfig {
@@ -57,6 +61,7 @@ export interface ExchangeConfig extends ExchangeConfigFile {
 
 export type StrategyConfig = StrategyConfigFile;
 export type RiskConfig = RiskConfigFile;
+export type AccountConfig = AccountConfigFile;
 
 export interface AgenaiConfig {
 	env: EnvConfig;
@@ -194,6 +199,14 @@ export const loadRiskConfig = (
 ): RiskConfig => {
 	const riskPath = path.join(configDir, "risk", `${riskProfile}.json`);
 	return readJsonFile<RiskConfigFile>(riskPath);
+};
+
+export const loadAccountConfig = (
+	configDir = getDefaultConfigDir(),
+	accountProfile = "paper"
+): AccountConfig => {
+	const accountPath = path.join(configDir, "account", `${accountProfile}.json`);
+	return readJsonFile<AccountConfigFile>(accountPath);
 };
 
 export const loadAgenaiConfig = (

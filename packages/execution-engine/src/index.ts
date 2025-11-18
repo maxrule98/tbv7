@@ -1,13 +1,22 @@
 import { PositionSide } from "@agenai/core";
 import { MexcClient } from "@agenai/exchange-mexc";
 import { TradePlan } from "@agenai/risk-engine";
+import {
+	ClosedTrade,
+	PaperAccount,
+	PaperAccountSnapshot,
+} from "./paperAccount";
 
 export type ExecutionMode = "paper" | "live";
 
 export interface ExecutionEngineOptions {
 	client: MexcClient;
 	mode?: ExecutionMode;
+	paperAccount?: PaperAccount;
 }
+
+export { PaperAccount } from "./paperAccount";
+export type { PaperAccountSnapshot, ClosedTrade } from "./paperAccount";
 
 export interface ExecutionContext {
 	price: number;
@@ -37,9 +46,11 @@ interface PaperPosition extends PaperPositionSnapshot {}
 export class ExecutionEngine {
 	private readonly mode: ExecutionMode;
 	private readonly paperPositions = new Map<string, PaperPosition>();
+	private readonly paperAccount?: PaperAccount;
 
 	constructor(private readonly options: ExecutionEngineOptions) {
 		this.mode = options.mode ?? "paper";
+		this.paperAccount = options.paperAccount;
 	}
 
 	getPaperPosition(symbol: string): PaperPositionSnapshot {
@@ -67,6 +78,18 @@ export class ExecutionEngine {
 			price: order?.average ?? order?.price ?? context.price ?? null,
 			mode: this.mode,
 		};
+	}
+
+	hasPaperAccount(): boolean {
+		return Boolean(this.paperAccount);
+	}
+
+	snapshotPaperAccount(unrealizedPnl: number): PaperAccountSnapshot | null {
+		if (!this.paperAccount) {
+			return null;
+		}
+
+		return this.paperAccount.snapshot(unrealizedPnl);
 	}
 
 	private handlePaperExecution(
@@ -108,8 +131,24 @@ export class ExecutionEngine {
 		}
 
 		const closedQuantity = position.size;
-		const realizedPnl = (fillPrice - position.avgEntryPrice) * closedQuantity;
+		const entryPrice = position.avgEntryPrice!;
+		const realizedPnl = (fillPrice - entryPrice) * closedQuantity;
 		position.realizedPnl += realizedPnl;
+
+		if (this.paperAccount) {
+			const closedTrade: ClosedTrade = {
+				symbol: plan.symbol,
+				side: "LONG",
+				size: closedQuantity,
+				entryPrice,
+				exitPrice: fillPrice,
+				realizedPnl,
+				timestamp: new Date().toISOString(),
+			};
+			const snapshot = this.paperAccount.registerClosedTrade(closedTrade);
+			this.logPaperAccountUpdate(plan.symbol, snapshot);
+		}
+
 		position.side = "FLAT";
 		position.size = 0;
 		position.avgEntryPrice = null;
@@ -137,5 +176,18 @@ export class ExecutionEngine {
 		}
 
 		return this.paperPositions.get(symbol)!;
+	}
+
+	private logPaperAccountUpdate(
+		symbol: string,
+		snapshot: PaperAccountSnapshot
+	): void {
+		console.log(
+			JSON.stringify({
+				event: "paper_account_update",
+				symbol,
+				snapshot,
+			})
+		);
 	}
 }
