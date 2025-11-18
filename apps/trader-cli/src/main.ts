@@ -5,7 +5,11 @@ import {
 	loadAgenaiConfig,
 } from "@agenai/core";
 import { MexcClient } from "@agenai/exchange-mexc";
-import { ExecutionEngine, ExecutionResult } from "@agenai/execution-engine";
+import {
+	ExecutionEngine,
+	ExecutionResult,
+	PaperPositionSnapshot,
+} from "@agenai/execution-engine";
 import { RiskManager, TradePlan } from "@agenai/risk-engine";
 import { MacdAr4Strategy } from "@agenai/strategy-engine";
 
@@ -52,8 +56,6 @@ const main = async (): Promise<void> => {
 
 	const candlesBySymbol = new Map<string, Candle[]>();
 	const lastTimestampBySymbol = new Map<string, number>();
-	const positionBySymbol = new Map<string, PositionState>();
-	positionBySymbol.set(symbol, { side: "FLAT", quantity: 0 });
 
 	await bootstrapCandles(
 		client,
@@ -69,7 +71,6 @@ const main = async (): Promise<void> => {
 		riskManager,
 		executionEngine,
 		simulatedEquity,
-		positionBySymbol,
 		symbol,
 		timeframe,
 		candlesBySymbol,
@@ -108,7 +109,6 @@ const startPolling = async (
 	riskManager: RiskManager,
 	executionEngine: ExecutionEngine,
 	equity: number,
-	positionBySymbol: Map<string, PositionState>,
 	symbol: string,
 	timeframe: string,
 	candlesBySymbol: Map<string, Candle[]>,
@@ -137,7 +137,7 @@ const startPolling = async (
 				const buffer = appendCandle(candlesBySymbol, latest);
 				logCandle(latest);
 
-				const positionState = getPositionState(positionBySymbol, symbol);
+				const positionState = executionEngine.getPaperPosition(symbol);
 				const intent = strategy.decide(buffer, positionState.side);
 				logStrategyDecision(latest, intent);
 
@@ -146,27 +146,41 @@ const startPolling = async (
 						intent,
 						latest.close,
 						equity,
-						positionState.quantity
+						positionState.size
 					);
 					if (!plan) {
-						continue;
-					}
-
-					if (shouldSkipExecution(plan, positionState)) {
-						logExecutionSkipped(plan, positionState);
+						logExecutionSkipped(
+							intent,
+							positionState.side,
+							"no_position_to_close"
+						);
 					} else {
-						logTradePlan(plan, latest);
-						try {
-							const result = await executionEngine.execute(plan, {
-								price: latest.close,
-							});
-							logExecutionResult(result);
-							updatePositionState(positionBySymbol, plan);
-						} catch (error) {
-							logExecutionError(error, plan);
+						const skipReason = getPreExecutionSkipReason(plan, positionState);
+						if (skipReason) {
+							logExecutionSkipped(plan, positionState.side, skipReason);
+						} else {
+							logTradePlan(plan, latest);
+							try {
+								const result = await executionEngine.execute(plan, {
+									price: latest.close,
+								});
+								if (result.status === "skipped") {
+									logExecutionSkipped(
+										plan,
+										positionState.side,
+										result.reason ?? "execution_engine_skip"
+									);
+								} else {
+									logExecutionResult(result);
+								}
+							} catch (error) {
+								logExecutionError(error, plan);
+							}
 						}
 					}
 				}
+
+				logPaperPosition(symbol, executionEngine.getPaperPosition(symbol));
 			} else {
 				console.info("No new candle yet for", symbol);
 			}
@@ -232,17 +246,24 @@ const logTradePlan = (plan: TradePlan, candle: Candle): void => {
 };
 
 const logExecutionResult = (result: ExecutionResult): void => {
-	console.log(
-		JSON.stringify({
-			event:
-				result.mode === "paper" ? "paper_execution_result" : "execution_result",
-			symbol: result.symbol,
-			side: result.side,
-			quantity: result.quantity,
-			price: result.price,
-			status: result.status,
-		})
-	);
+	const payload: Record<string, unknown> = {
+		event:
+			result.mode === "paper" ? "paper_execution_result" : "execution_result",
+		symbol: result.symbol,
+		side: result.side,
+		quantity: result.quantity,
+		price: result.price,
+		status: result.status,
+	};
+
+	if (typeof result.realizedPnl === "number") {
+		payload.realizedPnl = result.realizedPnl;
+	}
+	if (typeof result.totalRealizedPnl === "number") {
+		payload.totalRealizedPnl = result.totalRealizedPnl;
+	}
+
+	console.log(JSON.stringify(payload));
 };
 
 const logExecutionError = (error: unknown, plan: TradePlan): void => {
@@ -267,60 +288,49 @@ const logMarketDataError = (error: unknown): void => {
 };
 
 const logExecutionSkipped = (
-	plan: TradePlan,
-	positionState: PositionState
+	planOrIntent: TradePlan | TradeIntent,
+	positionSide: PositionSide,
+	reason: string
 ): void => {
 	console.log(
 		JSON.stringify({
 			event: "execution_skipped",
-			symbol: plan.symbol,
-			side: plan.side,
-			reason:
-				plan.side === "buy" && positionState.side === "LONG"
-					? "already_long"
-					: "already_flat",
+			symbol: planOrIntent.symbol,
+			side: "side" in planOrIntent ? planOrIntent.side : planOrIntent.intent,
+			positionSide,
+			reason,
 		})
 	);
 };
 
-const getPositionState = (
-	positionBySymbol: Map<string, PositionState>,
-	symbol: string
-): PositionState =>
-	positionBySymbol.get(symbol) ?? { side: "FLAT", quantity: 0 };
-
-const updatePositionState = (
-	positionBySymbol: Map<string, PositionState>,
-	plan: TradePlan
-): void => {
-	if (plan.side === "buy") {
-		positionBySymbol.set(plan.symbol, {
-			side: "LONG",
-			quantity: plan.quantity,
-		});
-		return;
-	}
-
-	positionBySymbol.set(plan.symbol, { side: "FLAT", quantity: 0 });
-};
-
-const shouldSkipExecution = (
+const getPreExecutionSkipReason = (
 	plan: TradePlan,
-	positionState: PositionState
-): boolean => {
+	positionState: PaperPositionSnapshot
+): string | null => {
 	if (plan.side === "buy" && positionState.side === "LONG") {
-		return true;
+		return "already_long";
 	}
 	if (plan.side === "sell" && positionState.side === "FLAT") {
-		return true;
+		return "already_flat";
 	}
-	return false;
+	return null;
 };
 
-interface PositionState {
-	side: PositionSide;
-	quantity: number;
-}
+const logPaperPosition = (
+	symbol: string,
+	position: PaperPositionSnapshot
+): void => {
+	console.log(
+		JSON.stringify({
+			event: "paper_position",
+			symbol,
+			side: position.side,
+			size: position.size,
+			avgEntryPrice: position.avgEntryPrice,
+			realizedPnl: position.realizedPnl,
+		})
+	);
+};
 
 const delay = (ms: number): Promise<void> =>
 	new Promise((resolve) => {
