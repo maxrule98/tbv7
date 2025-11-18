@@ -27,10 +27,13 @@ interface StrategyConfigFile {
 
 interface RiskConfigFile {
 	maxLeverage: number;
-	riskPerTradePct: number;
+	riskPerTradePercent?: number;
+	riskPerTradePct?: number;
 	maxPositions: number;
 	slPct: number;
 	tpPct: number;
+	minPositionSize?: number;
+	maxPositionSize?: number;
 }
 
 interface AccountConfigFile {
@@ -60,7 +63,15 @@ export interface ExchangeConfig extends ExchangeConfigFile {
 }
 
 export type StrategyConfig = StrategyConfigFile;
-export type RiskConfig = RiskConfigFile;
+export interface RiskConfig {
+	maxLeverage: number;
+	riskPerTradePercent: number;
+	maxPositions: number;
+	slPct: number;
+	tpPct: number;
+	minPositionSize: number;
+	maxPositionSize: number;
+}
 export type AccountConfig = AccountConfigFile;
 
 export interface AgenaiConfig {
@@ -198,7 +209,19 @@ export const loadRiskConfig = (
 	riskProfile = "default"
 ): RiskConfig => {
 	const riskPath = path.join(configDir, "risk", `${riskProfile}.json`);
-	return readJsonFile<RiskConfigFile>(riskPath);
+	const file = readJsonFile<RiskConfigFile>(riskPath);
+	const riskPerTradePercent =
+		file.riskPerTradePercent ??
+		(file.riskPerTradePct !== undefined ? file.riskPerTradePct / 100 : 0.01);
+	return {
+		maxLeverage: file.maxLeverage,
+		riskPerTradePercent,
+		maxPositions: file.maxPositions,
+		slPct: file.slPct,
+		tpPct: file.tpPct,
+		minPositionSize: file.minPositionSize ?? 0.001,
+		maxPositionSize: file.maxPositionSize ?? 1,
+	};
 };
 
 export const loadAccountConfig = (

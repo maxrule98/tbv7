@@ -138,10 +138,12 @@ Produces:
 ```json
 {
 	"maxLeverage": 5,
-	"riskPerTradePct": 0.5,
+	"riskPerTradePercent": 0.01,
 	"maxPositions": 1,
 	"slPct": 1.0,
-	"tpPct": 2.0
+	"tpPct": 2.0,
+	"minPositionSize": 0.0005,
+	"maxPositionSize": 0.01
 }
 ```
 

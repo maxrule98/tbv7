@@ -41,11 +41,7 @@ const main = async (): Promise<void> => {
 		arWindow: 20,
 		minForecast: 0,
 	});
-	const riskManager = new RiskManager({
-		riskPerTradePct: config.risk.riskPerTradePct,
-		slPct: config.risk.slPct,
-		tpPct: config.risk.tpPct,
-	});
+	const riskManager = new RiskManager(config.risk);
 	const accountConfig = loadAccountConfig();
 	const executionMode = config.env.executionMode;
 	const paperAccount =
@@ -64,6 +60,16 @@ const main = async (): Promise<void> => {
 	console.info("AgenAI Trader CLI started");
 	console.info(
 		JSON.stringify({ symbol, timeframe, useTestnet: exchange.testnet })
+	);
+	console.log(
+		JSON.stringify({
+			event: "risk_config",
+			riskPerTradePercent: config.risk.riskPerTradePercent,
+			minPositionSize: config.risk.minPositionSize,
+			maxPositionSize: config.risk.maxPositionSize,
+			slPct: config.risk.slPct,
+			tpPct: config.risk.tpPct,
+		})
 	);
 
 	const candlesBySymbol = new Map<string, Candle[]>();
@@ -120,13 +126,13 @@ const startPolling = async (
 	strategy: MacdAr4Strategy,
 	riskManager: RiskManager,
 	executionEngine: ExecutionEngine,
-	initialEquity: number,
+	defaultEquity: number,
 	symbol: string,
 	timeframe: string,
 	candlesBySymbol: Map<string, Candle[]>,
 	lastTimestampBySymbol: Map<string, number>
 ): Promise<never> => {
-	let equity = initialEquity;
+	let fallbackEquity = defaultEquity;
 	while (true) {
 		let latest: Candle | undefined;
 		try {
@@ -151,6 +157,13 @@ const startPolling = async (
 				logCandle(latest);
 
 				const positionState = executionEngine.getPaperPosition(symbol);
+				const unrealizedPnl = calculateUnrealizedPnl(
+					positionState,
+					latest.close
+				);
+				const prePlanSnapshot =
+					executionEngine.snapshotPaperAccount(unrealizedPnl);
+				const accountEquity = prePlanSnapshot?.equity ?? fallbackEquity;
 				const intent = strategy.decide(buffer, positionState.side);
 				logStrategyDecision(latest, intent);
 
@@ -158,14 +171,16 @@ const startPolling = async (
 					const plan = riskManager.plan(
 						intent,
 						latest.close,
-						equity,
+						accountEquity,
 						positionState.size
 					);
 					if (!plan) {
 						logExecutionSkipped(
 							intent,
 							positionState.side,
-							"no_position_to_close"
+							intent.intent === "CLOSE_LONG"
+								? "no_position_to_close"
+								: "risk_plan_rejected"
 						);
 					} else {
 						const skipReason = getPreExecutionSkipReason(plan, positionState);
@@ -203,7 +218,7 @@ const startPolling = async (
 					latest.timestamp
 				);
 				if (accountSnapshot) {
-					equity = accountSnapshot.equity;
+					fallbackEquity = accountSnapshot.equity;
 				}
 			} else {
 				console.info("No new candle yet for", symbol);

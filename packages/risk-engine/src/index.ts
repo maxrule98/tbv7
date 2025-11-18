@@ -11,45 +11,44 @@ export interface TradePlan {
 }
 
 export interface RiskConfig {
-	riskPerTradePct: number;
+	riskPerTradePercent: number;
 	slPct: number;
 	tpPct: number;
-	minNotional?: number;
+	minPositionSize: number;
+	maxPositionSize: number;
 }
 
 export class RiskManager {
-	private readonly minNotional: number;
-	private readonly minQuantity = 0.001; // TODO: fetch from exchange limits when exchange metadata is wired in.
-
-	constructor(private readonly config: RiskConfig) {
-		this.minNotional = config.minNotional ?? 50;
-	}
+	constructor(private readonly config: RiskConfig) {}
 
 	plan(
 		intent: TradeIntent,
 		lastPrice: number,
-		equity: number,
+		accountEquity: number,
 		currentPositionQuantity = 0
 	): TradePlan | null {
 		if (intent.intent === "NO_ACTION") {
 			return null;
 		}
 
-		const notional = Math.max(
-			(equity * this.config.riskPerTradePct) / 100,
-			this.minNotional
-		);
-		const computedQuantity = parseFloat((notional / lastPrice).toFixed(4));
-
 		if (intent.intent === "OPEN_LONG") {
-			const quantity = this.ensureMinQuantity(computedQuantity);
+			const stopLossPrice = this.calculateStopLoss(lastPrice);
+			const takeProfitPrice = this.calculateTakeProfit(lastPrice);
+			const quantity = this.calculatePositionSize(
+				accountEquity,
+				lastPrice,
+				stopLossPrice
+			);
+			if (quantity === null) {
+				return null;
+			}
 			return {
 				symbol: intent.symbol,
 				side: "buy",
 				type: "market",
 				quantity,
-				stopLossPrice: this.calculateStopLoss(lastPrice),
-				takeProfitPrice: this.calculateTakeProfit(lastPrice),
+				stopLossPrice,
+				takeProfitPrice,
 				reason: intent.reason,
 			};
 		}
@@ -58,13 +57,11 @@ export class RiskManager {
 			if (currentPositionQuantity <= 0) {
 				return null;
 			}
-
-			const quantity = this.ensureMinQuantity(currentPositionQuantity);
 			return {
 				symbol: intent.symbol,
 				side: "sell",
 				type: "market",
-				quantity,
+				quantity: currentPositionQuantity,
 				stopLossPrice: lastPrice,
 				takeProfitPrice: lastPrice,
 				reason: intent.reason,
@@ -82,7 +79,30 @@ export class RiskManager {
 		return parseFloat((price * (1 + this.config.tpPct / 100)).toFixed(2));
 	}
 
-	private ensureMinQuantity(quantity: number): number {
-		return quantity < this.minQuantity ? this.minQuantity : quantity;
+	private calculatePositionSize(
+		accountEquity: number,
+		entryPrice: number,
+		stopLossPrice: number
+	): number | null {
+		const stopDistance = Math.abs(entryPrice - stopLossPrice);
+		if (stopDistance <= 0) {
+			return null;
+		}
+
+		const riskAmount = accountEquity * this.config.riskPerTradePercent;
+		if (riskAmount <= 0) {
+			return null;
+		}
+
+		let size = riskAmount / stopDistance;
+		if (!Number.isFinite(size) || size <= 0) {
+			return null;
+		}
+
+		size = Math.min(
+			Math.max(size, this.config.minPositionSize),
+			this.config.maxPositionSize
+		);
+		return parseFloat(size.toFixed(6));
 	}
 }
