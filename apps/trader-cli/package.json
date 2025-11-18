@@ -1,19 +1,19 @@
 {
-  "name": "@agenai/trader-cli",
-  "version": "0.1.0",
-  "private": true,
-  "main": "dist/main.js",
-  "types": "dist/main.d.ts",
-  "dependencies": {
-    "@agenai/core": "workspace:*",
-    "@agenai/exchange-binance": "workspace:*",
-    "@agenai/risk-engine": "workspace:*",
-    "@agenai/execution-engine": "workspace:*",
-    "@agenai/strategy-engine": "workspace:*"
-  },
-  "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "ts-node --project tsconfig.json --require tsconfig-paths/register src/main.ts",
-    "start": "node dist/main.js"
-  }
+	"name": "@agenai/trader-cli",
+	"version": "0.1.0",
+	"private": true,
+	"main": "dist/main.js",
+	"types": "dist/main.d.ts",
+	"dependencies": {
+		"@agenai/core": "workspace:*",
+		"@agenai/exchange-mexc": "workspace:*",
+		"@agenai/risk-engine": "workspace:*",
+		"@agenai/execution-engine": "workspace:*",
+		"@agenai/strategy-engine": "workspace:*"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"dev": "ts-node --project tsconfig.json --require tsconfig-paths/register src/main.ts",
+		"start": "node dist/main.js"
+	}
 }

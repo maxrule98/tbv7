@@ -4,7 +4,7 @@ import {
 	TradeIntent,
 	loadAgenaiConfig,
 } from "@agenai/core";
-import { BinanceClient } from "@agenai/exchange-binance";
+import { MexcClient } from "@agenai/exchange-mexc";
 import { ExecutionEngine, ExecutionResult } from "@agenai/execution-engine";
 import { RiskManager, TradePlan } from "@agenai/risk-engine";
 import { MacdAr4Strategy } from "@agenai/strategy-engine";
@@ -15,10 +15,10 @@ const main = async (): Promise<void> => {
 	const config = loadAgenaiConfig();
 	const exchange = config.exchange;
 
-	const client = new BinanceClient({
+	const client = new MexcClient({
 		apiKey: exchange.credentials.apiKey,
-		apiSecret: exchange.credentials.apiSecret,
-		useTestnet: exchange.testnet,
+		secret: exchange.credentials.apiSecret,
+		useFutures: true,
 	});
 
 	const symbol =
@@ -39,7 +39,10 @@ const main = async (): Promise<void> => {
 		slPct: config.risk.slPct,
 		tpPct: config.risk.tpPct,
 	});
-	const executionEngine = new ExecutionEngine(client);
+	const executionEngine = new ExecutionEngine({
+		client,
+		mode: config.env.executionMode,
+	});
 	const simulatedEquity = 100;
 
 	console.info("AgenAI Trader CLI started");
@@ -75,43 +78,32 @@ const main = async (): Promise<void> => {
 };
 
 const bootstrapCandles = async (
-	client: BinanceClient,
+	client: MexcClient,
 	symbol: string,
 	timeframe: string,
 	candlesBySymbol: Map<string, Candle[]>,
 	lastTimestampBySymbol: Map<string, number>
 ): Promise<void> => {
 	try {
-		const candles = await client.fetchOHLCV({ symbol, timeframe, limit: 300 });
+		const candles = await client.fetchOHLCV(symbol, timeframe, 300);
 		if (!candles.length) {
 			console.warn("Bootstrap fetch returned no candles for", symbol);
 			return;
 		}
 
-		const normalized: Candle[] = candles.map((raw) => ({
-			symbol,
-			timeframe,
-			timestamp: raw.timestamp,
-			open: raw.open,
-			high: raw.high,
-			low: raw.low,
-			close: raw.close,
-			volume: raw.volume,
-		}));
-
-		candlesBySymbol.set(symbol, normalized);
+		candlesBySymbol.set(symbol, candles);
 		lastTimestampBySymbol.set(
 			symbol,
-			normalized[normalized.length - 1]?.timestamp ?? 0
+			candles[candles.length - 1]?.timestamp ?? 0
 		);
-		console.info(`Bootstrapped ${normalized.length} candles for ${symbol}`);
+		console.info(`Bootstrapped ${candles.length} candles for ${symbol}`);
 	} catch (error) {
 		logMarketDataError(error);
 	}
 };
 
 const startPolling = async (
-	client: BinanceClient,
+	client: MexcClient,
 	strategy: MacdAr4Strategy,
 	riskManager: RiskManager,
 	executionEngine: ExecutionEngine,
@@ -125,22 +117,13 @@ const startPolling = async (
 	while (true) {
 		let latest: Candle | undefined;
 		try {
-			const candles = await client.fetchOHLCV({ symbol, timeframe, limit: 1 });
+			const candles = await client.fetchOHLCV(symbol, timeframe, 1);
 			const latestRaw = candles[candles.length - 1];
 
 			if (!latestRaw) {
 				console.warn("No candle data returned for", symbol);
 			} else {
-				latest = {
-					symbol,
-					timeframe,
-					timestamp: latestRaw.timestamp,
-					open: latestRaw.open,
-					high: latestRaw.high,
-					low: latestRaw.low,
-					close: latestRaw.close,
-					volume: latestRaw.volume,
-				};
+				latest = latestRaw;
 			}
 		} catch (error) {
 			logMarketDataError(error);
@@ -174,7 +157,9 @@ const startPolling = async (
 					} else {
 						logTradePlan(plan, latest);
 						try {
-							const result = await executionEngine.execute(plan);
+							const result = await executionEngine.execute(plan, {
+								price: latest.close,
+							});
 							logExecutionResult(result);
 							updatePositionState(positionBySymbol, plan);
 						} catch (error) {
@@ -249,7 +234,8 @@ const logTradePlan = (plan: TradePlan, candle: Candle): void => {
 const logExecutionResult = (result: ExecutionResult): void => {
 	console.log(
 		JSON.stringify({
-			event: "execution_result",
+			event:
+				result.mode === "paper" ? "paper_execution_result" : "execution_result",
 			symbol: result.symbol,
 			side: result.side,
 			quantity: result.quantity,

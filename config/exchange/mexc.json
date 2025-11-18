@@ -1,0 +1,8 @@
+{
+	"exchange": "mexc",
+	"market": "usdt-m",
+	"testnet": false,
+	"restEndpoint": "https://contract.mexc.com",
+	"wsEndpoint": "wss://contract.mexc.com/ws",
+	"defaultSymbol": "BTC/USDT"
+}

@@ -10,7 +10,7 @@ This repository starts fresh at **v1**, representing the final architecture alig
 
 - Build a **powerful, modular trading engine** with:
 
-  - Exchange adapters (starting with Binance USDT-M Futures)
+  - Exchange adapters (currently MEXC USDT-M perpetuals)
   - Real-time WebSocket market data
   - Deterministic indicator pipelines (MACD, EMA, RSI, ATR…)
   - Forecasting models (AR(4), MACD forecast, regression error-correction)
@@ -43,6 +43,7 @@ agenai-trader/
   packages/
     core/
     exchange-binance/
+    exchange-mexc/
     indicators/
     models-quant/
     strategy-engine/
@@ -60,7 +61,7 @@ Each package is isolated and reusable, following clean modular design.
 
 ### **1. Market Data**
 
-- Binance WebSockets (candles/trades)
+- MEXC REST/WS swaps (candles/trades)
 - REST fallback
 - In-memory OHLCV cache
 
@@ -101,9 +102,8 @@ Produces:
 
 ### **6. Execution Engine**
 
-- Converts trade plan → CCXT orders
-- Syncs positions
-- Manages SL/TP
+- Converts trade plan → CCXT orders (MEXC linear swaps)
+- Paper mode simulator and live order relay
 - Rate-limit safe logic
 
 ---
@@ -163,12 +163,12 @@ cp .env.example .env.live
 
 Set:
 
-- API keys
-- Testnet/mainnet toggle
-- Symbol
-- Logging options
+- `EXCHANGE_ID` (`mexc`)
+- `MEXC_API_KEY` / `MEXC_API_SECRET` (leave blank for paper mode)
+- `EXECUTION_MODE` (`paper` or `live`)
+- Symbol + timeframe overrides
 
-### **3. Run live trader (testnet)**
+### **3. Run trader (paper by default)**
 
 ```bash
 pnpm --filter trader-cli dev
@@ -204,7 +204,7 @@ If an AI assistant (Codex/GPT) is contributing:
 1. Keep all code **modular**
 2. Never hardcode config—use `/config`
 3. Indicators + models must be **pure functions**
-4. Exchange access must go through `exchange-binance`
+4. Exchange access must go through `exchange-mexc`
 5. No circular imports
 6. Live + backtest must share strategy code
 7. Update the README if architecture changes

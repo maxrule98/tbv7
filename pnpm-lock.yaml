@@ -46,9 +46,9 @@ importers:
       '@agenai/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@agenai/exchange-binance':
+      '@agenai/exchange-mexc':
         specifier: workspace:*
-        version: link:../../packages/exchange-binance
+        version: link:../../packages/exchange-mexc
       '@agenai/execution-engine':
         specifier: workspace:*
         version: link:../../packages/execution-engine
@@ -76,14 +76,23 @@ importers:
         specifier: ^4.3.81
         version: 4.5.19
 
+  packages/exchange-mexc:
+    dependencies:
+      '@agenai/core':
+        specifier: workspace:*
+        version: link:../core
+      ccxt:
+        specifier: ^4.3.81
+        version: 4.5.19
+
   packages/execution-engine:
     dependencies:
       '@agenai/core':
         specifier: workspace:*
         version: link:../core
-      '@agenai/exchange-binance':
+      '@agenai/exchange-mexc':
         specifier: workspace:*
-        version: link:../exchange-binance
+        version: link:../exchange-mexc
       '@agenai/risk-engine':
         specifier: workspace:*
         version: link:../risk-engine

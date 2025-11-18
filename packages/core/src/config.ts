@@ -33,15 +33,22 @@ interface RiskConfigFile {
 	tpPct: number;
 }
 
+export type ExecutionMode = "paper" | "live";
+
 export interface EnvConfig {
+	exchangeId: string;
+	executionMode: ExecutionMode;
 	binanceApiKey: string;
 	binanceApiSecret: string;
 	binanceUseTestnet: boolean;
+	mexcApiKey: string;
+	mexcApiSecret: string;
 	defaultSymbol: string;
 	defaultTimeframe: string;
 }
 
 export interface ExchangeConfig extends ExchangeConfigFile {
+	id: string;
 	credentials: {
 		apiKey: string;
 		apiSecret: string;
@@ -110,6 +117,10 @@ const toBoolean = (value: string | undefined, fallback = false): boolean => {
 	return value.toLowerCase() === "true";
 };
 
+const normalizeExecutionMode = (value: string | undefined): ExecutionMode => {
+	return value?.toLowerCase() === "live" ? "live" : "paper";
+};
+
 const readJsonFile = <T>(filePath: string): T => {
 	const contents = fs.readFileSync(filePath, "utf-8");
 	return JSON.parse(contents) as T;
@@ -123,12 +134,16 @@ export const loadEnvConfig = (envPath = getDefaultEnvPath()): EnvConfig => {
 	}
 
 	return {
-		binanceApiKey: getEnvVar("BINANCE_API_KEY"),
-		binanceApiSecret: getEnvVar("BINANCE_API_SECRET"),
+		exchangeId: getEnvVar("EXCHANGE_ID", "mexc"),
+		executionMode: normalizeExecutionMode(getEnvVar("EXECUTION_MODE", "paper")),
+		binanceApiKey: getEnvVar("BINANCE_API_KEY", ""),
+		binanceApiSecret: getEnvVar("BINANCE_API_SECRET", ""),
 		binanceUseTestnet: toBoolean(
-			getEnvVar("BINANCE_USE_TESTNET", "true"),
-			true
+			getEnvVar("BINANCE_USE_TESTNET", "false"),
+			false
 		),
+		mexcApiKey: getEnvVar("MEXC_API_KEY", ""),
+		mexcApiSecret: getEnvVar("MEXC_API_SECRET", ""),
 		defaultSymbol: getEnvVar("DEFAULT_SYMBOL", "BTC/USDT"),
 		defaultTimeframe: getEnvVar("DEFAULT_TIMEFRAME", "1m"),
 	};
@@ -137,22 +152,27 @@ export const loadEnvConfig = (envPath = getDefaultEnvPath()): EnvConfig => {
 export const loadExchangeConfig = (
 	env: EnvConfig,
 	configDir = getDefaultConfigDir(),
-	exchangeProfile = "binance.testnet"
+	exchangeProfile?: string
 ): ExchangeConfig => {
-	const exchangePath = path.join(
-		configDir,
-		"exchange",
-		`${exchangeProfile}.json`
-	);
+	const profile = exchangeProfile ?? env.exchangeId ?? "mexc";
+	const exchangePath = path.join(configDir, "exchange", `${profile}.json`);
 	const exchangeFile = readJsonFile<ExchangeConfigFile>(exchangePath);
+	const isBinance = profile.startsWith("binance");
+	const credentials = isBinance
+		? {
+				apiKey: env.binanceApiKey,
+				apiSecret: env.binanceApiSecret,
+		  }
+		: {
+				apiKey: env.mexcApiKey,
+				apiSecret: env.mexcApiSecret,
+		  };
 	return {
 		...exchangeFile,
-		testnet: env.binanceUseTestnet ?? exchangeFile.testnet,
+		id: profile,
+		testnet: isBinance ? env.binanceUseTestnet : exchangeFile.testnet,
 		defaultSymbol: env.defaultSymbol || exchangeFile.defaultSymbol,
-		credentials: {
-			apiKey: env.binanceApiKey,
-			apiSecret: env.binanceApiSecret,
-		},
+		credentials,
 	};
 };
 
