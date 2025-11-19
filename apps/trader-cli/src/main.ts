@@ -2,6 +2,7 @@ import {
 	Candle,
 	PositionSide,
 	TradeIntent,
+	RiskConfig,
 	loadAccountConfig,
 	loadAgenaiConfig,
 } from "@agenai/core";
@@ -69,6 +70,8 @@ const main = async (): Promise<void> => {
 			maxPositionSize: config.risk.maxPositionSize,
 			slPct: config.risk.slPct,
 			tpPct: config.risk.tpPct,
+			trailingActivationPct: config.risk.trailingActivationPct,
+			trailingTrailPct: config.risk.trailingTrailPct,
 		})
 	);
 
@@ -87,6 +90,7 @@ const main = async (): Promise<void> => {
 		client,
 		strategy,
 		riskManager,
+		config.risk,
 		executionEngine,
 		initialEquity,
 		symbol,
@@ -125,6 +129,7 @@ const startPolling = async (
 	client: MexcClient,
 	strategy: MacdAr4Strategy,
 	riskManager: RiskManager,
+	riskConfig: RiskConfig,
 	executionEngine: ExecutionEngine,
 	defaultEquity: number,
 	symbol: string,
@@ -173,12 +178,32 @@ const startPolling = async (
 					accountEquity
 				);
 				if (forcedExitHandled) {
-					const latestPosition = executionEngine.getPosition(symbol);
-					logPaperPosition(symbol, latestPosition);
-					const accountSnapshot = snapshotPaperAccount(
+					const accountSnapshot = logAndSnapshotPosition(
 						executionEngine,
-						calculateUnrealizedPnl(latestPosition, latest.close),
 						symbol,
+						latest.close,
+						latest.timestamp
+					);
+					if (accountSnapshot) {
+						fallbackEquity = accountSnapshot.equity;
+					}
+					continue;
+				}
+
+				const trailingExitHandled = await maybeHandleTrailingStop(
+					symbol,
+					positionState,
+					latest,
+					riskManager,
+					executionEngine,
+					accountEquity,
+					riskConfig
+				);
+				if (trailingExitHandled) {
+					const accountSnapshot = logAndSnapshotPosition(
+						executionEngine,
+						symbol,
+						latest.close,
 						latest.timestamp
 					);
 					if (accountSnapshot) {
@@ -304,6 +329,132 @@ const maybeHandleForcedExit = async (
 			forcedIntent,
 			positionState.side,
 			"forced_exit_plan_rejected"
+		);
+		return true;
+	}
+
+	const skipReason = getPreExecutionSkipReason(plan, positionState);
+	if (skipReason) {
+		logExecutionSkipped(plan, positionState.side, skipReason);
+		return true;
+	}
+
+	logTradePlan(plan, lastCandle);
+	try {
+		const result = await executionEngine.execute(plan, {
+			price: lastCandle.close,
+		});
+		if (result.status === "skipped") {
+			logExecutionSkipped(
+				plan,
+				positionState.side,
+				result.reason ?? "execution_engine_skip"
+			);
+		} else {
+			logExecutionResult(result);
+		}
+	} catch (error) {
+		logExecutionError(error, plan);
+	}
+
+	return true;
+};
+
+const maybeHandleTrailingStop = async (
+	symbol: string,
+	positionState: PaperPositionSnapshot,
+	lastCandle: Candle,
+	riskManager: RiskManager,
+	executionEngine: ExecutionEngine,
+	accountEquity: number,
+	riskConfig: RiskConfig
+): Promise<boolean> => {
+	if (positionState.side !== "LONG" || positionState.size <= 0) {
+		return false;
+	}
+
+	const entryPrice =
+		positionState.entryPrice > 0
+			? positionState.entryPrice
+			: positionState.avgEntryPrice ?? 0;
+	if (entryPrice <= 0) {
+		return false;
+	}
+
+	const activationPct = Math.max(riskConfig.trailingActivationPct ?? 0, 0);
+	const trailPct = Math.max(riskConfig.trailingTrailPct ?? 0, 0);
+	if (trailPct <= 0) {
+		return false;
+	}
+
+	let isTrailingActive = positionState.isTrailingActive;
+	let peakPrice =
+		positionState.peakPrice > 0 ? positionState.peakPrice : entryPrice;
+	let trailingStopPrice =
+		positionState.trailingStopPrice > 0
+			? positionState.trailingStopPrice
+			: positionState.stopLossPrice ?? 0;
+	const updates: Partial<PaperPositionSnapshot> = {};
+
+	if (
+		!isTrailingActive &&
+		lastCandle.close >= entryPrice * (1 + activationPct)
+	) {
+		isTrailingActive = true;
+		updates.isTrailingActive = true;
+	}
+
+	if (!isTrailingActive) {
+		if (Object.keys(updates).length) {
+			executionEngine.updatePosition(symbol, updates);
+		}
+		return false;
+	}
+
+	peakPrice = Math.max(peakPrice, lastCandle.high);
+	const proposedTrailing = peakPrice * (1 - trailPct);
+	if (peakPrice !== positionState.peakPrice) {
+		updates.peakPrice = peakPrice;
+	}
+	if (proposedTrailing > trailingStopPrice) {
+		trailingStopPrice = proposedTrailing;
+		updates.trailingStopPrice = trailingStopPrice;
+	}
+
+	if (Object.keys(updates).length) {
+		executionEngine.updatePosition(symbol, updates);
+	}
+
+	if (trailingStopPrice <= 0 || lastCandle.low > trailingStopPrice) {
+		return false;
+	}
+
+	console.log(
+		JSON.stringify({
+			event: "strategy_decision",
+			intent: "CLOSE_LONG",
+			reason: "trailing_stop_hit",
+		})
+	);
+
+	const forcedIntent: TradeIntent = {
+		symbol,
+		intent: "CLOSE_LONG",
+		reason: "trailing_stop_hit",
+		timestamp: lastCandle.timestamp,
+	};
+
+	const plan = riskManager.plan(
+		forcedIntent,
+		lastCandle.close,
+		accountEquity,
+		positionState.size
+	);
+	if (!plan) {
+		logExecutionSkipped(
+			forcedIntent,
+			positionState.side,
+			"trailing_exit_plan_rejected"
 		);
 		return true;
 	}
@@ -475,6 +626,10 @@ const logPaperPosition = (
 			realizedPnl: position.realizedPnl,
 			stopLossPrice: position.stopLossPrice,
 			takeProfitPrice: position.takeProfitPrice,
+			entryPrice: position.entryPrice,
+			peakPrice: position.peakPrice,
+			trailingStopPrice: position.trailingStopPrice,
+			isTrailingActive: position.isTrailingActive,
 		})
 	);
 };
@@ -492,6 +647,22 @@ const snapshotPaperAccount = (
 
 	logPaperAccountSnapshot(symbol, timestamp, snapshot);
 	return snapshot;
+};
+
+const logAndSnapshotPosition = (
+	executionEngine: ExecutionEngine,
+	symbol: string,
+	price: number,
+	timestamp: number
+): PaperAccountSnapshot | null => {
+	const latestPosition = executionEngine.getPosition(symbol);
+	logPaperPosition(symbol, latestPosition);
+	return snapshotPaperAccount(
+		executionEngine,
+		calculateUnrealizedPnl(latestPosition, price),
+		symbol,
+		timestamp
+	);
 };
 
 const logPaperAccountSnapshot = (

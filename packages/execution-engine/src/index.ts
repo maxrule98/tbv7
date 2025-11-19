@@ -39,6 +39,10 @@ export interface PaperPositionSnapshot {
 	size: number;
 	avgEntryPrice: number | null;
 	realizedPnl: number;
+	entryPrice: number;
+	peakPrice: number;
+	trailingStopPrice: number;
+	isTrailingActive: boolean;
 	stopLossPrice?: number;
 	takeProfitPrice?: number;
 }
@@ -61,6 +65,15 @@ export class ExecutionEngine {
 
 	getPaperPosition(symbol: string): PaperPositionSnapshot {
 		return this.getPosition(symbol);
+	}
+
+	updatePosition(
+		symbol: string,
+		updates: Partial<PaperPosition>
+	): PaperPositionSnapshot {
+		const position = this.ensurePaperPosition(symbol);
+		Object.assign(position, updates);
+		return { ...position };
 	}
 
 	async execute(
@@ -109,6 +122,10 @@ export class ExecutionEngine {
 			position.side = "LONG";
 			position.size = plan.quantity;
 			position.avgEntryPrice = fillPrice;
+			position.entryPrice = fillPrice;
+			position.peakPrice = fillPrice;
+			position.trailingStopPrice = plan.stopLossPrice;
+			position.isTrailingActive = false;
 			position.stopLossPrice = plan.stopLossPrice;
 			position.takeProfitPrice = plan.takeProfitPrice;
 			return {
@@ -160,6 +177,10 @@ export class ExecutionEngine {
 		position.side = "FLAT";
 		position.size = 0;
 		position.avgEntryPrice = null;
+		position.entryPrice = 0;
+		position.peakPrice = 0;
+		position.trailingStopPrice = 0;
+		position.isTrailingActive = false;
 		position.stopLossPrice = undefined;
 		position.takeProfitPrice = undefined;
 
@@ -182,6 +203,10 @@ export class ExecutionEngine {
 				size: 0,
 				avgEntryPrice: null,
 				realizedPnl: 0,
+				entryPrice: 0,
+				peakPrice: 0,
+				trailingStopPrice: 0,
+				isTrailingActive: false,
 				stopLossPrice: undefined,
 				takeProfitPrice: undefined,
 			});

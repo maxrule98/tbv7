@@ -5,5 +5,7 @@
 	"slPct": 1.0,
 	"tpPct": 2.0,
 	"minPositionSize": 0.0005,
-	"maxPositionSize": 0.01
+	"maxPositionSize": 0.01,
+	"trailingActivationPct": 0.005,
+	"trailingTrailPct": 0.003
 }

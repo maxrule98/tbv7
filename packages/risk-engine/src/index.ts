@@ -16,6 +16,8 @@ export interface RiskConfig {
 	tpPct: number;
 	minPositionSize: number;
 	maxPositionSize: number;
+	trailingActivationPct: number;
+	trailingTrailPct: number;
 }
 
 export class RiskManager {

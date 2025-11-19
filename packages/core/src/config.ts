@@ -34,6 +34,8 @@ interface RiskConfigFile {
 	tpPct: number;
 	minPositionSize?: number;
 	maxPositionSize?: number;
+	trailingActivationPct?: number;
+	trailingTrailPct?: number;
 }
 
 interface AccountConfigFile {
@@ -71,6 +73,8 @@ export interface RiskConfig {
 	tpPct: number;
 	minPositionSize: number;
 	maxPositionSize: number;
+	trailingActivationPct: number;
+	trailingTrailPct: number;
 }
 export type AccountConfig = AccountConfigFile;
 
@@ -215,6 +219,8 @@ export const loadRiskConfig = (
 		tpPct: file.tpPct,
 		minPositionSize: file.minPositionSize ?? 0.001,
 		maxPositionSize: file.maxPositionSize ?? 1,
+		trailingActivationPct: file.trailingActivationPct ?? 0.005,
+		trailingTrailPct: file.trailingTrailPct ?? 0.003,
 	};
 };
 
