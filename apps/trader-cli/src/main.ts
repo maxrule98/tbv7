@@ -156,7 +156,7 @@ const startPolling = async (
 				const buffer = appendCandle(candlesBySymbol, latest);
 				logCandle(latest);
 
-				const positionState = executionEngine.getPaperPosition(symbol);
+				const positionState = executionEngine.getPosition(symbol);
 				const unrealizedPnl = calculateUnrealizedPnl(
 					positionState,
 					latest.close
@@ -164,6 +164,29 @@ const startPolling = async (
 				const prePlanSnapshot =
 					executionEngine.snapshotPaperAccount(unrealizedPnl);
 				const accountEquity = prePlanSnapshot?.equity ?? fallbackEquity;
+
+				const forcedExitHandled = await maybeHandleForcedExit(
+					positionState,
+					latest,
+					riskManager,
+					executionEngine,
+					accountEquity
+				);
+				if (forcedExitHandled) {
+					const latestPosition = executionEngine.getPosition(symbol);
+					logPaperPosition(symbol, latestPosition);
+					const accountSnapshot = snapshotPaperAccount(
+						executionEngine,
+						calculateUnrealizedPnl(latestPosition, latest.close),
+						symbol,
+						latest.timestamp
+					);
+					if (accountSnapshot) {
+						fallbackEquity = accountSnapshot.equity;
+					}
+					continue;
+				}
+
 				const intent = strategy.decide(buffer, positionState.side);
 				logStrategyDecision(latest, intent);
 
@@ -208,7 +231,7 @@ const startPolling = async (
 					}
 				}
 
-				const latestPosition = executionEngine.getPaperPosition(symbol);
+				const latestPosition = executionEngine.getPosition(symbol);
 				logPaperPosition(symbol, latestPosition);
 
 				const accountSnapshot = snapshotPaperAccount(
@@ -227,6 +250,89 @@ const startPolling = async (
 
 		await delay(POLL_INTERVAL_MS);
 	}
+};
+
+const maybeHandleForcedExit = async (
+	positionState: PaperPositionSnapshot,
+	lastCandle: Candle,
+	riskManager: RiskManager,
+	executionEngine: ExecutionEngine,
+	accountEquity: number
+): Promise<boolean> => {
+	if (positionState.side !== "LONG" || positionState.size <= 0) {
+		return false;
+	}
+
+	const stopLossPrice = positionState.stopLossPrice;
+	const takeProfitPrice = positionState.takeProfitPrice;
+	const hitSL =
+		typeof stopLossPrice === "number" && lastCandle.low <= stopLossPrice;
+	const hitTP =
+		typeof takeProfitPrice === "number" && lastCandle.high >= takeProfitPrice;
+
+	if (!hitSL && !hitTP) {
+		return false;
+	}
+
+	const reason = hitSL ? "stop_loss_hit" : "take_profit_hit";
+	const forcedIntent: TradeIntent = {
+		symbol: lastCandle.symbol,
+		intent: "CLOSE_LONG",
+		reason,
+		timestamp: lastCandle.timestamp,
+	};
+
+	console.log(
+		JSON.stringify({
+			event: "strategy_decision",
+			symbol: lastCandle.symbol,
+			timestamp: new Date(lastCandle.timestamp).toISOString(),
+			close: lastCandle.close,
+			intent: "CLOSE_LONG",
+			reason,
+		})
+	);
+
+	const plan = riskManager.plan(
+		forcedIntent,
+		lastCandle.close,
+		accountEquity,
+		positionState.size
+	);
+	if (!plan) {
+		logExecutionSkipped(
+			forcedIntent,
+			positionState.side,
+			"forced_exit_plan_rejected"
+		);
+		return true;
+	}
+
+	const skipReason = getPreExecutionSkipReason(plan, positionState);
+	if (skipReason) {
+		logExecutionSkipped(plan, positionState.side, skipReason);
+		return true;
+	}
+
+	logTradePlan(plan, lastCandle);
+	try {
+		const result = await executionEngine.execute(plan, {
+			price: lastCandle.close,
+		});
+		if (result.status === "skipped") {
+			logExecutionSkipped(
+				plan,
+				positionState.side,
+				result.reason ?? "execution_engine_skip"
+			);
+		} else {
+			logExecutionResult(result);
+		}
+	} catch (error) {
+		logExecutionError(error, plan);
+	}
+
+	return true;
 };
 
 const appendCandle = (
@@ -367,6 +473,8 @@ const logPaperPosition = (
 			size: position.size,
 			avgEntryPrice: position.avgEntryPrice,
 			realizedPnl: position.realizedPnl,
+			stopLossPrice: position.stopLossPrice,
+			takeProfitPrice: position.takeProfitPrice,
 		})
 	);
 };

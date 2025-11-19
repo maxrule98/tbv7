@@ -39,6 +39,8 @@ export interface PaperPositionSnapshot {
 	size: number;
 	avgEntryPrice: number | null;
 	realizedPnl: number;
+	stopLossPrice?: number;
+	takeProfitPrice?: number;
 }
 
 interface PaperPosition extends PaperPositionSnapshot {}
@@ -53,8 +55,12 @@ export class ExecutionEngine {
 		this.paperAccount = options.paperAccount;
 	}
 
-	getPaperPosition(symbol: string): PaperPositionSnapshot {
+	getPosition(symbol: string): PaperPositionSnapshot {
 		return { ...this.ensurePaperPosition(symbol) };
+	}
+
+	getPaperPosition(symbol: string): PaperPositionSnapshot {
+		return this.getPosition(symbol);
 	}
 
 	async execute(
@@ -103,6 +109,8 @@ export class ExecutionEngine {
 			position.side = "LONG";
 			position.size = plan.quantity;
 			position.avgEntryPrice = fillPrice;
+			position.stopLossPrice = plan.stopLossPrice;
+			position.takeProfitPrice = plan.takeProfitPrice;
 			return {
 				symbol: plan.symbol,
 				side: plan.side,
@@ -152,6 +160,8 @@ export class ExecutionEngine {
 		position.side = "FLAT";
 		position.size = 0;
 		position.avgEntryPrice = null;
+		position.stopLossPrice = undefined;
+		position.takeProfitPrice = undefined;
 
 		return {
 			symbol: plan.symbol,
@@ -172,6 +182,8 @@ export class ExecutionEngine {
 				size: 0,
 				avgEntryPrice: null,
 				realizedPnl: 0,
+				stopLossPrice: undefined,
+				takeProfitPrice: undefined,
 			});
 		}
 

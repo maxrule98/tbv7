@@ -175,14 +175,8 @@ export const loadExchangeConfig = (
 	const exchangeFile = readJsonFile<ExchangeConfigFile>(exchangePath);
 	const isBinance = profile.startsWith("binance");
 	const credentials = isBinance
-		? {
-				apiKey: env.binanceApiKey,
-				apiSecret: env.binanceApiSecret,
-		  }
-		: {
-				apiKey: env.mexcApiKey,
-				apiSecret: env.mexcApiSecret,
-		  };
+		? { apiKey: env.binanceApiKey, apiSecret: env.binanceApiSecret }
+		: { apiKey: env.mexcApiKey, apiSecret: env.mexcApiSecret };
 	return {
 		...exchangeFile,
 		id: profile,
