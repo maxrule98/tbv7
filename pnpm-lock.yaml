@@ -59,6 +59,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/strategy-engine
 
+  apps/trader-server:
+    dependencies:
+      '@agenai/trader-runtime':
+        specifier: workspace:*
+        version: link:../../packages/trader-runtime
+
   packages/backtest-core: {}
 
   packages/core:
@@ -120,6 +126,24 @@ importers:
       '@agenai/models-quant':
         specifier: workspace:*
         version: link:../models-quant
+
+  packages/trader-runtime:
+    dependencies:
+      '@agenai/core':
+        specifier: workspace:*
+        version: link:../core
+      '@agenai/exchange-mexc':
+        specifier: workspace:*
+        version: link:../exchange-mexc
+      '@agenai/execution-engine':
+        specifier: workspace:*
+        version: link:../execution-engine
+      '@agenai/risk-engine':
+        specifier: workspace:*
+        version: link:../risk-engine
+      '@agenai/strategy-engine':
+        specifier: workspace:*
+        version: link:../strategy-engine
 
 packages:
 

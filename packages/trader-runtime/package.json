@@ -1,0 +1,17 @@
+{
+	"name": "@agenai/trader-runtime",
+	"version": "0.1.0",
+	"private": true,
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json"
+	},
+	"dependencies": {
+		"@agenai/core": "workspace:*",
+		"@agenai/exchange-mexc": "workspace:*",
+		"@agenai/execution-engine": "workspace:*",
+		"@agenai/risk-engine": "workspace:*",
+		"@agenai/strategy-engine": "workspace:*"
+	}
+}
