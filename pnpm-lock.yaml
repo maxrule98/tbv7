@@ -138,6 +138,9 @@ importers:
       '@agenai/execution-engine':
         specifier: workspace:*
         version: link:../execution-engine
+      '@agenai/indicators':
+        specifier: workspace:*
+        version: link:../indicators
       '@agenai/risk-engine':
         specifier: workspace:*
         version: link:../risk-engine
