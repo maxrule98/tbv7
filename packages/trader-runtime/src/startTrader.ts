@@ -4,11 +4,13 @@ import {
 	Candle,
 	ExecutionMode,
 	PositionSide,
+	StrategyConfig,
 	RiskConfig,
 	TradeIntent,
 	loadAccountConfig,
 	loadAgenaiConfig,
 } from "@agenai/core";
+import { macd } from "@agenai/indicators";
 import { MexcClient } from "@agenai/exchange-mexc";
 import {
 	ExecutionEngine,
@@ -18,7 +20,12 @@ import {
 	PaperPositionSnapshot,
 } from "@agenai/execution-engine";
 import { RiskManager, TradePlan } from "@agenai/risk-engine";
-import { MacdAr4Strategy } from "@agenai/strategy-engine";
+import {
+	HigherTimeframeTrend,
+	HigherTimeframeTrendFetcher,
+	MacdAr4Config,
+	MacdAr4Strategy,
+} from "@agenai/strategy-engine";
 
 export const DEFAULT_POLL_INTERVAL_MS = 10_000;
 
@@ -67,12 +74,17 @@ export const startTrader = async (
 		useFutures: true,
 	});
 
-	const strategy = new MacdAr4Strategy({
-		emaFast: 12,
-		emaSlow: 26,
-		signal: 9,
-		arWindow: 20,
-		minForecast: 0,
+	const macdStrategyConfig = buildMacdAr4RuntimeConfig(agenaiConfig.strategy);
+	const getHTFTrend = createHigherTimeframeTrendFetcher(client, {
+		timeframe: macdStrategyConfig.higherTimeframe,
+		cacheMs: agenaiConfig.strategy.htfCacheMs,
+		deadband: agenaiConfig.strategy.thresholds.htfHistogramDeadband,
+		emaFast: macdStrategyConfig.emaFast,
+		emaSlow: macdStrategyConfig.emaSlow,
+		signal: macdStrategyConfig.signal,
+	});
+	const strategy = new MacdAr4Strategy(macdStrategyConfig, {
+		getHTFTrend,
 	});
 	const riskManager = new RiskManager(agenaiConfig.risk);
 	const paperAccount =
@@ -121,6 +133,99 @@ export const startTrader = async (
 		lastTimestampBySymbol,
 		traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
 	);
+};
+
+const buildMacdAr4RuntimeConfig = (
+	strategyConfig: StrategyConfig
+): MacdAr4Config => {
+	const { indicators, thresholds, higherTimeframe } = strategyConfig;
+	return {
+		emaFast: indicators.emaFast,
+		emaSlow: indicators.emaSlow,
+		signal: indicators.signal,
+		arWindow: indicators.arWindow,
+		minForecast: thresholds.minForecast,
+		pullbackFast: indicators.pullbackFast,
+		pullbackSlow: indicators.pullbackSlow,
+		atrPeriod: indicators.atrPeriod,
+		minAtr: thresholds.minAtr,
+		maxAtr: thresholds.maxAtr,
+		rsiPeriod: indicators.rsiPeriod,
+		rsiLongRange: [thresholds.rsiLongLower, thresholds.rsiLongUpper],
+		rsiShortRange: [thresholds.rsiShortLower, thresholds.rsiShortUpper],
+		higherTimeframe,
+	};
+};
+
+interface HigherTimeframeFetcherOptions {
+	cacheMs: number;
+	deadband: number;
+	emaFast: number;
+	emaSlow: number;
+	signal: number;
+	timeframe: string;
+}
+
+const createHigherTimeframeTrendFetcher = (
+	client: MexcClient,
+	options: HigherTimeframeFetcherOptions
+): HigherTimeframeTrendFetcher => {
+	const cache = new Map<
+		string,
+		{ fetchedAt: number; trend: HigherTimeframeTrend | null }
+	>();
+	const lookback = Math.max(options.emaSlow * 4, 300);
+	return async (symbol: string, timeframe = options.timeframe) => {
+		const now = Date.now();
+		const cached = cache.get(symbol);
+		if (cached && now - cached.fetchedAt < options.cacheMs) {
+			return cached.trend;
+		}
+
+		try {
+			const candles = await client.fetchOHLCV(symbol, timeframe, lookback);
+			const closes = candles.map((candle) => candle.close);
+			const macdResult = macd(
+				closes,
+				options.emaFast,
+				options.emaSlow,
+				options.signal
+			);
+			const trend = deriveTrendFromHistogram(
+				macdResult.histogram,
+				options.deadband
+			);
+			cache.set(symbol, { trend, fetchedAt: now });
+			return trend;
+		} catch (error) {
+			console.error(
+				JSON.stringify({
+					event: "htf_trend_error",
+					symbol,
+					timeframe,
+					message: error instanceof Error ? error.message : String(error),
+				})
+			);
+			return cached?.trend ?? null;
+		}
+	};
+};
+
+const deriveTrendFromHistogram = (
+	histogram: number | null,
+	deadband: number
+): HigherTimeframeTrend => {
+	if (histogram === null) {
+		return { macdHist: null, isBull: false, isBear: false, isNeutral: true };
+	}
+	const isBull = histogram > deadband;
+	const isBear = histogram < -deadband;
+	return {
+		macdHist: histogram,
+		isBull,
+		isBear,
+		isNeutral: !isBull && !isBear,
+	};
 };
 
 const logRiskConfig = (risk: RiskConfig): void => {
@@ -253,7 +358,7 @@ const startPolling = async (
 					continue;
 				}
 
-				const intent = strategy.decide(buffer, positionState.side);
+				const intent = await strategy.decide(buffer, positionState.side);
 				logStrategyDecision(latest, intent);
 
 				if (intent.intent === "OPEN_LONG" || intent.intent === "CLOSE_LONG") {

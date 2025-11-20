@@ -1,6 +1,18 @@
 import { Candle, PositionSide, TradeIntent } from "@agenai/core";
-import { macd } from "@agenai/indicators";
+import { calculateATR, calculateRSI, ema, macd } from "@agenai/indicators";
 import { ar4Forecast } from "@agenai/models-quant";
+
+export interface HigherTimeframeTrend {
+	macdHist: number | null;
+	isBull: boolean;
+	isBear: boolean;
+	isNeutral: boolean;
+}
+
+export type HigherTimeframeTrendFetcher = (
+	symbol: string,
+	timeframe: string
+) => Promise<HigherTimeframeTrend | null>;
 
 export interface MacdAr4Config {
 	emaFast: number;
@@ -8,81 +20,296 @@ export interface MacdAr4Config {
 	signal: number;
 	arWindow: number;
 	minForecast: number;
+	pullbackFast: number;
+	pullbackSlow: number;
+	atrPeriod: number;
+	minAtr: number;
+	maxAtr: number;
+	rsiPeriod: number;
+	rsiLongRange: [number, number];
+	rsiShortRange: [number, number];
+	higherTimeframe: string;
+}
+
+export interface MacdAr4StrategyDependencies {
+	getHTFTrend: HigherTimeframeTrendFetcher;
 }
 
 export class MacdAr4Strategy {
-	constructor(private readonly config: MacdAr4Config) {}
+	constructor(
+		private readonly config: MacdAr4Config,
+		private readonly deps: MacdAr4StrategyDependencies
+	) {
+		if (!deps?.getHTFTrend) {
+			throw new Error(
+				"MacdAr4Strategy requires a higher timeframe trend fetcher"
+			);
+		}
+	}
 
-	decide(candles: Candle[], position: PositionSide = "FLAT"): TradeIntent {
-		if (candles.length < Math.max(this.config.emaSlow, 6)) {
+	async decide(
+		candles: Candle[],
+		position: PositionSide = "FLAT"
+	): Promise<TradeIntent> {
+		const minCandlesNeeded = Math.max(
+			this.config.emaSlow + this.config.signal,
+			this.config.pullbackSlow + 2,
+			this.config.atrPeriod + 1,
+			this.config.rsiPeriod + 1,
+			this.config.arWindow
+		);
+		if (candles.length < minCandlesNeeded) {
 			return this.noAction(candles, "insufficient_candles");
 		}
 
-		const closes = candles.map((candle) => candle.close);
 		const latest = candles[candles.length - 1];
-		const macdResult = macd(
+		const closes = candles.map((candle) => candle.close);
+		const macdNow = macd(
 			closes,
 			this.config.emaFast,
 			this.config.emaSlow,
 			this.config.signal
 		);
-		const { macd: macdValue, signal } = macdResult;
-
-		if (macdValue === null || signal === null) {
+		const histogramNow = macdNow.histogram;
+		if (histogramNow === null) {
 			return this.noAction(candles, "macd_unavailable");
 		}
 
-		if (this.config.arWindow < 6) {
-			return this.noAction(candles, "ar_window_too_small");
-		}
+		const macdPrevious = macd(
+			closes.slice(0, closes.length - 1),
+			this.config.emaFast,
+			this.config.emaSlow,
+			this.config.signal
+		);
+		const histogramPrev = macdPrevious.histogram;
 
 		const histogramSeries = this.computeHistogramSeries(closes);
 		const histogramWindow = histogramSeries.slice(-this.config.arWindow);
 		const forecast =
-			histogramWindow.length >= Math.max(6, this.config.arWindow)
+			histogramWindow.length >= this.config.arWindow
 				? ar4Forecast(histogramWindow)
 				: null;
 
-		const bearishForecast = forecast !== null && forecast < 0;
+		const atrValue = calculateATR(
+			candles.map((candle) => ({
+				high: candle.high,
+				low: candle.low,
+				close: candle.close,
+			})),
+			this.config.atrPeriod
+		);
+		const rsiValue = calculateRSI(closes, this.config.rsiPeriod);
 
-		if (position === "LONG" && (macdValue < signal || bearishForecast)) {
-			return {
-				symbol: latest.symbol,
-				intent: "CLOSE_LONG",
-				reason: "macd_down_or_forecast_negative",
-			};
+		const pullbackFast = ema(closes, this.config.pullbackFast);
+		const pullbackSlow = ema(closes, this.config.pullbackSlow);
+		const pullbackZoneActive = this.isWithinPullbackZone(
+			latest,
+			pullbackFast,
+			pullbackSlow
+		);
+
+		const trend = await this.deps.getHTFTrend(
+			latest.symbol,
+			this.config.higherTimeframe
+		);
+		const htfTrend = this.normalizeTrend(trend);
+
+		const atrInRange = this.isAtrInRange(atrValue);
+		const rsiLongInRange = this.isValueBetween(
+			rsiValue,
+			this.config.rsiLongRange
+		);
+		const rsiShortInRange = this.isValueBetween(
+			rsiValue,
+			this.config.rsiShortRange
+		);
+		const forecastPositive =
+			forecast !== null && forecast > this.config.minForecast;
+		const forecastNegative =
+			forecast !== null && forecast < -this.config.minForecast;
+		const macdBullish = this.isMacdBullish(histogramNow, histogramPrev);
+		const macdBearish = this.isMacdBearish(histogramNow, histogramPrev);
+
+		const longSetupActive =
+			htfTrend.isBull &&
+			macdBullish &&
+			forecastPositive &&
+			rsiLongInRange &&
+			atrInRange &&
+			pullbackZoneActive;
+		const shortSetupActive =
+			htfTrend.isBear &&
+			macdBearish &&
+			forecastNegative &&
+			rsiShortInRange &&
+			atrInRange &&
+			pullbackZoneActive;
+
+		const longConfluence = longSetupActive && position === "FLAT";
+		const shortConfluence = shortSetupActive && position === "FLAT";
+
+		this.logStrategyContext(latest, {
+			htfTrend: htfTrend.label,
+			rsi: rsiValue,
+			atr: atrValue,
+			macd1mHist: histogramNow,
+			forecast,
+			checks: {
+				htfBullish: htfTrend.isBull,
+				htfBearish: htfTrend.isBear,
+				atrInRange,
+				rsiLongInRange,
+				rsiShortInRange,
+				macdBullish,
+				macdBearish,
+				forecastPositive,
+				forecastNegative,
+				pullbackZoneActive,
+				positionFlat: position === "FLAT",
+				longSetupActive,
+				shortSetupActive,
+			},
+		});
+
+		if (position === "LONG") {
+			if (shortSetupActive) {
+				return {
+					symbol: latest.symbol,
+					intent: "CLOSE_LONG",
+					reason: "opposite_confluence",
+				};
+			}
+			if (forecastNegative) {
+				return {
+					symbol: latest.symbol,
+					intent: "CLOSE_LONG",
+					reason: "forecast_flip",
+				};
+			}
+			if (!rsiLongInRange && rsiValue !== null) {
+				return {
+					symbol: latest.symbol,
+					intent: "CLOSE_LONG",
+					reason: "rsi_regime_break",
+				};
+			}
+			return this.noAction(candles, "holding_long");
 		}
 
-		if (forecast === null || forecast <= this.config.minForecast) {
-			return this.noAction(candles, "forecast_below_threshold");
-		}
-
-		if (
-			position !== "LONG" &&
-			macdValue > signal &&
-			forecast > this.config.minForecast
-		) {
+		if (longConfluence) {
 			return {
 				symbol: latest.symbol,
 				intent: "OPEN_LONG",
-				reason: "macd_up_and_forecast_positive",
+				reason: "long_confluence_met",
 			};
 		}
 
-		return this.noAction(
-			candles,
-			position === "LONG" ? "holding_long" : "no_signal"
+		if (shortConfluence) {
+			return this.noAction(candles, "short_signal_unavailable");
+		}
+
+		return this.noAction(candles, "no_signal");
+	}
+
+	private isAtrInRange(atrValue: number | null): boolean {
+		if (atrValue === null) {
+			return false;
+		}
+		return atrValue >= this.config.minAtr && atrValue <= this.config.maxAtr;
+	}
+
+	private isValueBetween(
+		value: number | null,
+		range: [number, number]
+	): boolean {
+		if (value === null) {
+			return false;
+		}
+		return value >= range[0] && value <= range[1];
+	}
+
+	private isMacdBullish(
+		histogramNow: number | null,
+		histogramPrev: number | null
+	): boolean {
+		if (histogramNow === null || histogramPrev === null) {
+			return false;
+		}
+		return (
+			histogramNow > histogramPrev || (histogramPrev <= 0 && histogramNow > 0)
 		);
 	}
 
-	private noAction(candles: Candle[], reason: string): TradeIntent {
-		const latestSymbol =
-			candles.length > 0 ? candles[candles.length - 1].symbol : "UNKNOWN";
-		return {
-			symbol: latestSymbol,
-			intent: "NO_ACTION",
-			reason,
-		};
+	private isMacdBearish(
+		histogramNow: number | null,
+		histogramPrev: number | null
+	): boolean {
+		if (histogramNow === null || histogramPrev === null) {
+			return false;
+		}
+		return (
+			histogramNow < histogramPrev || (histogramPrev >= 0 && histogramNow < 0)
+		);
+	}
+
+	private isWithinPullbackZone(
+		latest: Candle,
+		pullbackFast: number | null,
+		pullbackSlow: number | null
+	): boolean {
+		if (pullbackFast === null || pullbackSlow === null) {
+			return false;
+		}
+		const upper = Math.max(pullbackFast, pullbackSlow);
+		const lower = Math.min(pullbackFast, pullbackSlow);
+		return latest.low <= upper && latest.high >= lower;
+	}
+
+	private normalizeTrend(
+		trend: HigherTimeframeTrend | null
+	): HigherTimeframeTrend & { label: "bull" | "bear" | "neutral" } {
+		if (!trend) {
+			return {
+				macdHist: null,
+				isBull: false,
+				isBear: false,
+				isNeutral: true,
+				label: "neutral",
+			};
+		}
+		const label: "bull" | "bear" | "neutral" = trend.isBull
+			? "bull"
+			: trend.isBear
+			? "bear"
+			: "neutral";
+		return { ...trend, label };
+	}
+
+	private logStrategyContext(
+		latest: Candle,
+		context: {
+			htfTrend: "bull" | "bear" | "neutral";
+			rsi: number | null;
+			atr: number | null;
+			macd1mHist: number | null;
+			forecast: number | null;
+			checks: Record<string, unknown>;
+		}
+	): void {
+		console.log(
+			JSON.stringify({
+				event: "strategy_context",
+				symbol: latest.symbol,
+				timeframe: latest.timeframe,
+				timestamp: new Date(latest.timestamp).toISOString(),
+				htfTrend: context.htfTrend,
+				rsi: context.rsi,
+				atr: context.atr,
+				macd1mHist: context.macd1mHist,
+				forecast: context.forecast,
+				confluenceChecks: context.checks,
+			})
+		);
 	}
 
 	private computeHistogramSeries(closes: number[]): number[] {
@@ -179,5 +406,15 @@ export class MacdAr4Strategy {
 	private average(values: number[]): number {
 		const sum = values.reduce((acc, value) => acc + value, 0);
 		return sum / values.length;
+	}
+
+	private noAction(candles: Candle[], reason: string): TradeIntent {
+		const latestSymbol =
+			candles.length > 0 ? candles[candles.length - 1].symbol : "UNKNOWN";
+		return {
+			symbol: latestSymbol,
+			intent: "NO_ACTION",
+			reason,
+		};
 	}
 }

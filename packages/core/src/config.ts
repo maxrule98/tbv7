@@ -17,11 +17,35 @@ interface ExchangeConfigFile {
 	defaultSymbol: string;
 }
 
+interface StrategyIndicatorConfigFile {
+	emaFast?: number;
+	emaSlow?: number;
+	signal?: number;
+	pullbackFast?: number;
+	pullbackSlow?: number;
+	atrPeriod?: number;
+	rsiPeriod?: number;
+	arWindow?: number;
+}
+
+interface StrategyThresholdConfigFile {
+	minForecast?: number;
+	minAtr?: number;
+	maxAtr?: number;
+	rsiLongLower?: number;
+	rsiLongUpper?: number;
+	rsiShortLower?: number;
+	rsiShortUpper?: number;
+	htfHistogramDeadband?: number;
+}
+
 interface StrategyConfigFile {
 	symbol: string;
 	timeframe: string;
-	indicators: Record<string, number>;
-	thresholds: Record<string, number | boolean>;
+	higherTimeframe?: string;
+	htfCacheMs?: number;
+	indicators: StrategyIndicatorConfigFile;
+	thresholds: StrategyThresholdConfigFile;
 	mode: string;
 }
 
@@ -64,7 +88,37 @@ export interface ExchangeConfig extends ExchangeConfigFile {
 	};
 }
 
-export type StrategyConfig = StrategyConfigFile;
+export interface StrategyIndicatorConfig {
+	emaFast: number;
+	emaSlow: number;
+	signal: number;
+	pullbackFast: number;
+	pullbackSlow: number;
+	atrPeriod: number;
+	rsiPeriod: number;
+	arWindow: number;
+}
+
+export interface StrategyThresholdConfig {
+	minForecast: number;
+	minAtr: number;
+	maxAtr: number;
+	rsiLongLower: number;
+	rsiLongUpper: number;
+	rsiShortLower: number;
+	rsiShortUpper: number;
+	htfHistogramDeadband: number;
+}
+
+export interface StrategyConfig {
+	symbol: string;
+	timeframe: string;
+	higherTimeframe: string;
+	htfCacheMs: number;
+	indicators: StrategyIndicatorConfig;
+	thresholds: StrategyThresholdConfig;
+	mode: string;
+}
 export interface RiskConfig {
 	maxLeverage: number;
 	riskPerTradePercent: number;
@@ -199,7 +253,38 @@ export const loadStrategyConfig = (
 		"strategies",
 		`${strategyProfile}.json`
 	);
-	return readJsonFile<StrategyConfigFile>(strategyPath);
+	const file = readJsonFile<StrategyConfigFile>(strategyPath);
+	const indicatorFile = file.indicators ?? {};
+	const thresholdFile = file.thresholds ?? {};
+	const indicators: StrategyIndicatorConfig = {
+		emaFast: indicatorFile.emaFast ?? 12,
+		emaSlow: indicatorFile.emaSlow ?? 26,
+		signal: indicatorFile.signal ?? 9,
+		pullbackFast: indicatorFile.pullbackFast ?? 9,
+		pullbackSlow: indicatorFile.pullbackSlow ?? 21,
+		atrPeriod: indicatorFile.atrPeriod ?? 14,
+		rsiPeriod: indicatorFile.rsiPeriod ?? 14,
+		arWindow: indicatorFile.arWindow ?? 20,
+	};
+	const thresholds: StrategyThresholdConfig = {
+		minForecast: thresholdFile.minForecast ?? 0,
+		minAtr: thresholdFile.minAtr ?? 8,
+		maxAtr: thresholdFile.maxAtr ?? 80,
+		rsiLongLower: thresholdFile.rsiLongLower ?? 40,
+		rsiLongUpper: thresholdFile.rsiLongUpper ?? 70,
+		rsiShortLower: thresholdFile.rsiShortLower ?? 30,
+		rsiShortUpper: thresholdFile.rsiShortUpper ?? 60,
+		htfHistogramDeadband: thresholdFile.htfHistogramDeadband ?? 0.0005,
+	};
+	return {
+		symbol: file.symbol,
+		timeframe: file.timeframe,
+		higherTimeframe: file.higherTimeframe ?? "15m",
+		htfCacheMs: file.htfCacheMs ?? 60_000,
+		indicators,
+		thresholds,
+		mode: file.mode ?? "long-only",
+	};
 };
 
 export const loadRiskConfig = (
