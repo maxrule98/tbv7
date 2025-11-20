@@ -34,3 +34,4 @@ __exportStar(require("./ema"), exports);
 __exportStar(require("./macd"), exports);
 __exportStar(require("./atr"), exports);
 __exportStar(require("./rsi"), exports);
+__exportStar(require("./sma"), exports);

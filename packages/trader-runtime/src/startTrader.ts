@@ -3,6 +3,8 @@ import {
 	AgenaiConfig,
 	Candle,
 	ExecutionMode,
+	MacdAr4StrategyConfig,
+	MomentumV3StrategyConfig,
 	PositionSide,
 	StrategyConfig,
 	RiskConfig,
@@ -25,6 +27,8 @@ import {
 	HigherTimeframeTrendFetcher,
 	MacdAr4Config,
 	MacdAr4Strategy,
+	MomentumV3Config,
+	MomentumV3Strategy,
 } from "@agenai/strategy-engine";
 
 export const DEFAULT_POLL_INTERVAL_MS = 10_000;
@@ -46,6 +50,10 @@ export interface StartTraderOptions {
 	exchangeProfile?: string;
 	strategyProfile?: string;
 	riskProfile?: string;
+}
+
+interface TraderStrategy {
+	decide: (candles: Candle[], position: PositionSide) => Promise<TradeIntent>;
 }
 
 export const startTrader = async (
@@ -74,18 +82,7 @@ export const startTrader = async (
 		useFutures: true,
 	});
 
-	const macdStrategyConfig = buildMacdAr4RuntimeConfig(agenaiConfig.strategy);
-	const getHTFTrend = createHigherTimeframeTrendFetcher(client, {
-		timeframe: macdStrategyConfig.higherTimeframe,
-		cacheMs: agenaiConfig.strategy.htfCacheMs,
-		deadband: agenaiConfig.strategy.thresholds.htfHistogramDeadband,
-		emaFast: macdStrategyConfig.emaFast,
-		emaSlow: macdStrategyConfig.emaSlow,
-		signal: macdStrategyConfig.signal,
-	});
-	const strategy = new MacdAr4Strategy(macdStrategyConfig, {
-		getHTFTrend,
-	});
+	const strategy = createStrategyInstance(client, agenaiConfig.strategy);
 	const riskManager = new RiskManager(agenaiConfig.risk);
 	const paperAccount =
 		executionMode === "paper"
@@ -136,7 +133,7 @@ export const startTrader = async (
 };
 
 const buildMacdAr4RuntimeConfig = (
-	strategyConfig: StrategyConfig
+	strategyConfig: MacdAr4StrategyConfig
 ): MacdAr4Config => {
 	const { indicators, thresholds, higherTimeframe } = strategyConfig;
 	return {
@@ -155,6 +152,54 @@ const buildMacdAr4RuntimeConfig = (
 		rsiShortRange: [thresholds.rsiShortLower, thresholds.rsiShortUpper],
 		higherTimeframe,
 	};
+};
+
+const buildMomentumV3RuntimeConfig = (
+	strategyConfig: MomentumV3StrategyConfig
+): MomentumV3Config => {
+	return {
+		atrPeriod: strategyConfig.atr.period,
+		atrEmaPeriod: strategyConfig.atr.emaPeriod,
+		volumeSmaPeriod: strategyConfig.volume.smaPeriod,
+		volumeSpikeMultiplier: strategyConfig.volume.spikeMultiplier,
+		breakoutLookback: strategyConfig.breakout.lookback,
+		rsiPeriod: strategyConfig.rsi.period,
+		rsiLongRange: [strategyConfig.rsi.longMin, strategyConfig.rsi.longMax],
+		rsiShortRange: [strategyConfig.rsi.shortMin, strategyConfig.rsi.shortMax],
+		macdFast: strategyConfig.htf.macdFast,
+		macdSlow: strategyConfig.htf.macdSlow,
+		macdSignal: strategyConfig.htf.macdSignal,
+		htfTimeframe: strategyConfig.htf.timeframe,
+	};
+};
+
+const createStrategyInstance = (
+	client: MexcClient,
+	strategyConfig: StrategyConfig
+): TraderStrategy => {
+	if (strategyConfig.id === "momentum_v3") {
+		const runtimeConfig = buildMomentumV3RuntimeConfig(strategyConfig);
+		const getHTFTrend = createHigherTimeframeTrendFetcher(client, {
+			timeframe: strategyConfig.htf.timeframe,
+			cacheMs: strategyConfig.htfCacheMs,
+			deadband: strategyConfig.htf.deadband,
+			emaFast: strategyConfig.htf.macdFast,
+			emaSlow: strategyConfig.htf.macdSlow,
+			signal: strategyConfig.htf.macdSignal,
+		});
+		return new MomentumV3Strategy(runtimeConfig, { getHTFTrend });
+	}
+
+	const macdConfig = buildMacdAr4RuntimeConfig(strategyConfig);
+	const getHTFTrend = createHigherTimeframeTrendFetcher(client, {
+		timeframe: macdConfig.higherTimeframe,
+		cacheMs: strategyConfig.htfCacheMs,
+		deadband: strategyConfig.thresholds.htfHistogramDeadband,
+		emaFast: macdConfig.emaFast,
+		emaSlow: macdConfig.emaSlow,
+		signal: macdConfig.signal,
+	});
+	return new MacdAr4Strategy(macdConfig, { getHTFTrend });
 };
 
 interface HigherTimeframeFetcherOptions {
@@ -270,7 +315,7 @@ const bootstrapCandles = async (
 
 const startPolling = async (
 	client: MexcClient,
-	strategy: MacdAr4Strategy,
+	strategy: TraderStrategy,
 	riskManager: RiskManager,
 	riskConfig: RiskConfig,
 	executionEngine: ExecutionEngine,

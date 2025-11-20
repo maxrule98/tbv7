@@ -1,4 +1,5 @@
 {
+	"id": "macd_ar4_v2",
 	"symbol": "BTC/USDT",
 	"timeframe": "1m",
 	"higherTimeframe": "15m",

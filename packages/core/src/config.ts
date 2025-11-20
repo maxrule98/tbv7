@@ -17,6 +17,8 @@ interface ExchangeConfigFile {
 	defaultSymbol: string;
 }
 
+export type StrategyId = "macd_ar4_v2" | "momentum_v3";
+
 interface StrategyIndicatorConfigFile {
 	emaFast?: number;
 	emaSlow?: number;
@@ -39,15 +41,63 @@ interface StrategyThresholdConfigFile {
 	htfHistogramDeadband?: number;
 }
 
-interface StrategyConfigFile {
+interface MomentumV3HtfConfigFile {
+	timeframe?: string;
+	macdFast?: number;
+	macdSlow?: number;
+	macdSignal?: number;
+	deadband?: number;
+}
+
+interface MomentumV3AtrConfigFile {
+	period?: number;
+	emaPeriod?: number;
+}
+
+interface MomentumV3VolumeConfigFile {
+	smaPeriod?: number;
+	spikeMultiplier?: number;
+}
+
+interface MomentumV3BreakoutConfigFile {
+	lookback?: number;
+}
+
+interface MomentumV3RsiConfigFile {
+	period?: number;
+	longMin?: number;
+	longMax?: number;
+	shortMin?: number;
+	shortMax?: number;
+}
+
+interface BaseStrategyConfigFile {
+	id?: StrategyId;
 	symbol: string;
 	timeframe: string;
-	higherTimeframe?: string;
+	mode?: string;
 	htfCacheMs?: number;
-	indicators: StrategyIndicatorConfigFile;
-	thresholds: StrategyThresholdConfigFile;
-	mode: string;
 }
+
+interface MacdAr4StrategyConfigFile extends BaseStrategyConfigFile {
+	id?: "macd_ar4_v2";
+	higherTimeframe?: string;
+	indicators?: StrategyIndicatorConfigFile;
+	thresholds?: StrategyThresholdConfigFile;
+}
+
+interface MomentumV3StrategyConfigFile extends BaseStrategyConfigFile {
+	id: "momentum_v3";
+	htf?: MomentumV3HtfConfigFile;
+	atr?: MomentumV3AtrConfigFile;
+	volume?: MomentumV3VolumeConfigFile;
+	breakout?: MomentumV3BreakoutConfigFile;
+	rsi?: MomentumV3RsiConfigFile;
+}
+
+type StrategyConfigFile =
+	| MacdAr4StrategyConfigFile
+	| MomentumV3StrategyConfigFile;
 
 interface RiskConfigFile {
 	maxLeverage: number;
@@ -88,6 +138,13 @@ export interface ExchangeConfig extends ExchangeConfigFile {
 	};
 }
 
+interface BaseStrategyConfig {
+	id: StrategyId;
+	symbol: string;
+	timeframe: string;
+	mode: string;
+}
+
 export interface StrategyIndicatorConfig {
 	emaFast: number;
 	emaSlow: number;
@@ -110,15 +167,57 @@ export interface StrategyThresholdConfig {
 	htfHistogramDeadband: number;
 }
 
-export interface StrategyConfig {
-	symbol: string;
-	timeframe: string;
+export interface MacdAr4StrategyConfig extends BaseStrategyConfig {
+	id: "macd_ar4_v2";
 	higherTimeframe: string;
 	htfCacheMs: number;
 	indicators: StrategyIndicatorConfig;
 	thresholds: StrategyThresholdConfig;
-	mode: string;
 }
+
+export interface MomentumV3HtfConfig {
+	timeframe: string;
+	macdFast: number;
+	macdSlow: number;
+	macdSignal: number;
+	deadband: number;
+}
+
+export interface MomentumV3AtrConfig {
+	period: number;
+	emaPeriod: number;
+}
+
+export interface MomentumV3VolumeConfig {
+	smaPeriod: number;
+	spikeMultiplier: number;
+}
+
+export interface MomentumV3BreakoutConfig {
+	lookback: number;
+}
+
+export interface MomentumV3RsiConfig {
+	period: number;
+	longMin: number;
+	longMax: number;
+	shortMin: number;
+	shortMax: number;
+}
+
+export interface MomentumV3StrategyConfig extends BaseStrategyConfig {
+	id: "momentum_v3";
+	htfCacheMs: number;
+	htf: MomentumV3HtfConfig;
+	atr: MomentumV3AtrConfig;
+	volume: MomentumV3VolumeConfig;
+	breakout: MomentumV3BreakoutConfig;
+	rsi: MomentumV3RsiConfig;
+}
+
+export type StrategyConfig =
+	| MacdAr4StrategyConfig
+	| MomentumV3StrategyConfig;
 export interface RiskConfig {
 	maxLeverage: number;
 	riskPerTradePercent: number;
@@ -254,6 +353,16 @@ export const loadStrategyConfig = (
 		`${strategyProfile}.json`
 	);
 	const file = readJsonFile<StrategyConfigFile>(strategyPath);
+	const strategyId: StrategyId =
+		file.id === "momentum_v3" ? "momentum_v3" : "macd_ar4_v2";
+	return strategyId === "momentum_v3"
+		? normalizeMomentumV3Config(file as MomentumV3StrategyConfigFile)
+		: normalizeMacdAr4Config(file as MacdAr4StrategyConfigFile);
+};
+
+const normalizeMacdAr4Config = (
+	file: MacdAr4StrategyConfigFile
+): MacdAr4StrategyConfig => {
 	const indicatorFile = file.indicators ?? {};
 	const thresholdFile = file.thresholds ?? {};
 	const indicators: StrategyIndicatorConfig = {
@@ -277,13 +386,56 @@ export const loadStrategyConfig = (
 		htfHistogramDeadband: thresholdFile.htfHistogramDeadband ?? 0.0005,
 	};
 	return {
+		id: "macd_ar4_v2",
 		symbol: file.symbol,
 		timeframe: file.timeframe,
+		mode: file.mode ?? "long-only",
 		higherTimeframe: file.higherTimeframe ?? "15m",
 		htfCacheMs: file.htfCacheMs ?? 60_000,
 		indicators,
 		thresholds,
+	};
+};
+
+const normalizeMomentumV3Config = (
+	file: MomentumV3StrategyConfigFile
+): MomentumV3StrategyConfig => {
+	const htfFile = file.htf ?? {};
+	const atrFile = file.atr ?? {};
+	const volumeFile = file.volume ?? {};
+	const breakoutFile = file.breakout ?? {};
+	const rsiFile = file.rsi ?? {};
+	return {
+		id: "momentum_v3",
+		symbol: file.symbol,
+		timeframe: file.timeframe,
 		mode: file.mode ?? "long-only",
+		htfCacheMs: file.htfCacheMs ?? 60_000,
+		htf: {
+			timeframe: htfFile.timeframe ?? "15m",
+			macdFast: htfFile.macdFast ?? 12,
+			macdSlow: htfFile.macdSlow ?? 26,
+			macdSignal: htfFile.macdSignal ?? 9,
+			deadband: htfFile.deadband ?? 0,
+		},
+		atr: {
+			period: atrFile.period ?? 14,
+			emaPeriod: atrFile.emaPeriod ?? 20,
+		},
+		volume: {
+			smaPeriod: volumeFile.smaPeriod ?? 20,
+			spikeMultiplier: volumeFile.spikeMultiplier ?? 1.2,
+		},
+		breakout: {
+			lookback: breakoutFile.lookback ?? 20,
+		},
+		rsi: {
+			period: rsiFile.period ?? 14,
+			longMin: rsiFile.longMin ?? 45,
+			longMax: rsiFile.longMax ?? 70,
+			shortMin: rsiFile.shortMin ?? 20,
+			shortMax: rsiFile.shortMax ?? 55,
+		},
 	};
 };
 
