@@ -61,14 +61,10 @@ export class MomentumV3Strategy {
 			candles.map(this.toAtrInput),
 			this.config.atrPeriod
 		);
-		const atrValue = atrSeries.length
-			? atrSeries[atrSeries.length - 1]
-			: null;
+		const atrValue = atrSeries.length ? atrSeries[atrSeries.length - 1] : null;
 		const atrEmaValue = this.calculateAtrEma(atrSeries);
 		const atrInBreakout =
-			atrValue !== null &&
-			atrEmaValue !== null &&
-			atrValue > atrEmaValue;
+			atrValue !== null && atrEmaValue !== null && atrValue > atrEmaValue;
 
 		const volumeSma = sma(volumes, this.config.volumeSmaPeriod);
 		const volumeSpike =
@@ -109,10 +105,9 @@ export class MomentumV3Strategy {
 		const longRsiBiasSatisfied = htfBearish
 			? Boolean(
 					rsiValue !== null &&
-					rsiValue >=
-						this.config.rsiLongRange[0] + rsiBearBiasPadding &&
-					rsiValue <= this.config.rsiLongRange[1]
-				)
+						rsiValue >= this.config.rsiLongRange[0] + rsiBearBiasPadding &&
+						rsiValue <= this.config.rsiLongRange[1]
+			  )
 			: rsiLongInRange;
 
 		const longSetupActive =
@@ -232,10 +227,9 @@ export class MomentumV3Strategy {
 		return price < lowestLow;
 	}
 
-	private toTrendLabel(trend: HigherTimeframeTrend | null):
-		| "bull"
-		| "bear"
-		| "chop" {
+	private toTrendLabel(
+		trend: HigherTimeframeTrend | null
+	): "bull" | "bear" | "chop" {
 		if (!trend) {
 			return "chop";
 		}

@@ -165,9 +165,7 @@ export interface MomentumV3StrategyConfig extends BaseStrategyConfig {
 	breakout: MomentumV3BreakoutConfig;
 	rsi: MomentumV3RsiConfig;
 }
-export type StrategyConfig =
-	| MacdAr4StrategyConfig
-	| MomentumV3StrategyConfig;
+export type StrategyConfig = MacdAr4StrategyConfig | MomentumV3StrategyConfig;
 export interface RiskConfig {
 	maxLeverage: number;
 	riskPerTradePercent: number;

@@ -12,10 +12,7 @@ export function calculateATR(candles: AtrInput[], period = 14): number | null {
 	return series[series.length - 1] ?? null;
 }
 
-export function calculateATRSeries(
-	candles: AtrInput[],
-	period = 14
-): number[] {
+export function calculateATRSeries(candles: AtrInput[], period = 14): number[] {
 	if (period <= 0 || candles.length < period + 1) {
 		return [];
 	}
@@ -26,8 +23,7 @@ export function calculateATRSeries(
 	}
 
 	let atr =
-		trueRanges.slice(0, period).reduce((acc, value) => acc + value, 0) /
-		period;
+		trueRanges.slice(0, period).reduce((acc, value) => acc + value, 0) / period;
 	const series: number[] = [Number(atr.toFixed(6))];
 
 	for (let i = period; i < trueRanges.length; i += 1) {
