@@ -37,3 +37,7 @@ __exportStar(
 	require("./strategies/vwap-delta-gamma/VWAPDeltaGammaStrategy"),
 	exports
 );
+__exportStar(require("./strategies/registry"), exports);
+__exportStar(require("./strategies/ids"), exports);
+__exportStar(require("./strategies/selection"), exports);
+__exportStar(require("./utils/logger"), exports);

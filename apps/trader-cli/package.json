@@ -13,7 +13,7 @@
 	},
 	"scripts": {
 		"build": "tsc -p tsconfig.json",
-		"dev": "ts-node --project tsconfig.json --require tsconfig-paths/register src/main.ts",
+		"dev": "ts-node --project tsconfig.dev.json --require tsconfig-paths/register src/main.ts",
 		"start": "node dist/main.js"
 	}
 }

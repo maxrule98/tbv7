@@ -4,7 +4,7 @@
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
 	"scripts": {
-		"build": "tsc -p tsconfig.build.json",
+		"build": "rimraf dist && tsc -p tsconfig.build.json",
 		"dev": "ts-node src/index.ts",
 		"lint": "eslint 'src/**/*.ts'",
 		"test": "vitest run --passWithNoTests"
@@ -12,6 +12,10 @@
 	"dependencies": {
 		"dotenv": "^16.4.5",
 		"@agenai/indicators": "workspace:*",
-		"@agenai/models-quant": "workspace:*"
+		"@agenai/models-quant": "workspace:*",
+		"@agenai/strategy-engine": "workspace:*"
+	},
+	"devDependencies": {
+		"rimraf": "^5.0.5"
 	}
 }

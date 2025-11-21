@@ -8,7 +8,9 @@ import {
 	PositionSide,
 	StrategyConfig,
 	RiskConfig,
+	StrategyId,
 	TradeIntent,
+	createLogger,
 	loadAccountConfig,
 	loadAgenaiConfig,
 } from "@agenai/core";
@@ -31,6 +33,8 @@ import {
 	MomentumV3Strategy,
 } from "@agenai/strategy-engine";
 
+const logger = createLogger("trader-runtime");
+
 export const DEFAULT_POLL_INTERVAL_MS = 10_000;
 
 export interface TraderConfig {
@@ -39,6 +43,7 @@ export interface TraderConfig {
 	useTestnet: boolean;
 	executionMode?: ExecutionMode;
 	pollIntervalMs?: number;
+	strategyId?: StrategyId;
 }
 
 export interface StartTraderOptions {
@@ -58,12 +63,13 @@ export interface TraderStrategy {
 	decide: (candles: Candle[], position: PositionSide) => Promise<TradeIntent>;
 }
 
-type StrategySource = "override" | "builder" | "config";
+type StrategySource = "override" | "builder" | "registry";
 
 interface StrategyLogContext {
 	source: StrategySource;
 	strategy: TraderStrategy;
 	strategyConfig?: StrategyConfig;
+	strategyId: StrategyId;
 	traderConfig: TraderConfig;
 	executionMode: ExecutionMode;
 	builderName?: string;
@@ -94,6 +100,8 @@ export const startTrader = async (
 
 	const executionMode =
 		traderConfig.executionMode ?? agenaiConfig.env.executionMode ?? "paper";
+	const resolvedStrategyId =
+		traderConfig.strategyId ?? agenaiConfig.strategy.id;
 
 	const client = new MexcClient({
 		apiKey: agenaiConfig.exchange.credentials.apiKey,
@@ -105,7 +113,7 @@ export const startTrader = async (
 		? "override"
 		: options.strategyBuilder
 		? "builder"
-		: "config";
+		: "registry";
 	const strategy = options.strategyOverride
 		? options.strategyOverride
 		: options.strategyBuilder
@@ -125,18 +133,19 @@ export const startTrader = async (
 		? paperAccount.snapshot(0).equity
 		: accountConfig.startingBalance || 100;
 
-	console.info(
-		JSON.stringify({
-			symbol: traderConfig.symbol,
-			timeframe: traderConfig.timeframe,
-			useTestnet: traderConfig.useTestnet,
-		})
-	);
+	logger.info("trader_config", {
+		symbol: traderConfig.symbol,
+		timeframe: traderConfig.timeframe,
+		useTestnet: traderConfig.useTestnet,
+		executionMode,
+		strategyId: resolvedStrategyId,
+	});
 	logStrategyLoaded({
 		source: strategySource,
 		strategy,
 		strategyConfig:
-			strategySource === "config" ? agenaiConfig.strategy : undefined,
+			strategySource === "registry" ? agenaiConfig.strategy : undefined,
+		strategyId: resolvedStrategyId,
 		traderConfig,
 		executionMode,
 		builderName: options.strategyBuilder?.name,
@@ -221,7 +230,9 @@ const createStrategyInstance = (
 	strategyConfig: StrategyConfig
 ): TraderStrategy => {
 	if (strategyConfig.id === "momentum_v3") {
-		const runtimeConfig = buildMomentumV3RuntimeConfig(strategyConfig);
+		const runtimeConfig = buildMomentumV3RuntimeConfig(
+			strategyConfig as MomentumV3StrategyConfig
+		);
 		const getHTFTrend = createHigherTimeframeTrendFetcher(client, {
 			timeframe: strategyConfig.htf.timeframe,
 			cacheMs: strategyConfig.htfCacheMs,
@@ -233,7 +244,9 @@ const createStrategyInstance = (
 		return new MomentumV3Strategy(runtimeConfig, { getHTFTrend });
 	}
 
-	const macdConfig = buildMacdAr4RuntimeConfig(strategyConfig);
+	const macdConfig = buildMacdAr4RuntimeConfig(
+		strategyConfig as MacdAr4StrategyConfig
+	);
 	const getHTFTrend = createHigherTimeframeTrendFetcher(client, {
 		timeframe: macdConfig.higherTimeframe,
 		cacheMs: strategyConfig.htfCacheMs,
@@ -253,7 +266,6 @@ interface HigherTimeframeFetcherOptions {
 	signal: number;
 	timeframe: string;
 }
-
 const createHigherTimeframeTrendFetcher = (
 	client: MexcClient,
 	options: HigherTimeframeFetcherOptions
@@ -286,14 +298,11 @@ const createHigherTimeframeTrendFetcher = (
 			cache.set(symbol, { trend, fetchedAt: now });
 			return trend;
 		} catch (error) {
-			console.error(
-				JSON.stringify({
-					event: "htf_trend_error",
-					symbol,
-					timeframe,
-					message: error instanceof Error ? error.message : String(error),
-				})
-			);
+			logger.error("htf_trend_error", {
+				symbol,
+				timeframe,
+				message: error instanceof Error ? error.message : String(error),
+			});
 			return cached?.trend ?? null;
 		}
 	};
@@ -327,42 +336,38 @@ const logStrategyLoaded = ({
 	source,
 	strategy,
 	strategyConfig,
+	strategyId,
 	traderConfig,
 	executionMode,
 	builderName,
 	profiles,
 }: StrategyLogContext): void => {
 	const pollInterval = traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-	console.info(
-		JSON.stringify({
-			event: "strategy_loaded",
-			source,
-			strategyId: strategyConfig?.id ?? null,
-			strategyClass: getStrategyName(strategy),
-			symbol: traderConfig.symbol,
-			timeframe: traderConfig.timeframe,
-			executionMode,
-			useTestnet: traderConfig.useTestnet,
-			pollIntervalMs: pollInterval,
-			builder: builderName ?? null,
-			profiles: profiles ?? null,
-		})
-	);
+	logger.info("strategy_loaded", {
+		source,
+		strategyId,
+		strategyClass: getStrategyName(strategy),
+		symbol: traderConfig.symbol,
+		timeframe: traderConfig.timeframe,
+		executionMode,
+		useTestnet: traderConfig.useTestnet,
+		pollIntervalMs: pollInterval,
+		builder: builderName ?? null,
+		profiles: profiles ?? null,
+		configId: strategyConfig?.id ?? null,
+	});
 };
 
 const logRiskConfig = (risk: RiskConfig): void => {
-	console.log(
-		JSON.stringify({
-			event: "risk_config",
-			riskPerTradePercent: risk.riskPerTradePercent,
-			minPositionSize: risk.minPositionSize,
-			maxPositionSize: risk.maxPositionSize,
-			slPct: risk.slPct,
-			tpPct: risk.tpPct,
-			trailingActivationPct: risk.trailingActivationPct,
-			trailingTrailPct: risk.trailingTrailPct,
-		})
-	);
+	logger.info("risk_config", {
+		riskPerTradePercent: risk.riskPerTradePercent,
+		minPositionSize: risk.minPositionSize,
+		maxPositionSize: risk.maxPositionSize,
+		slPct: risk.slPct,
+		tpPct: risk.tpPct,
+		trailingActivationPct: risk.trailingActivationPct,
+		trailingTrailPct: risk.trailingTrailPct,
+	});
 };
 
 const bootstrapCandles = async (
@@ -375,7 +380,7 @@ const bootstrapCandles = async (
 	try {
 		const candles = await client.fetchOHLCV(symbol, timeframe, 300);
 		if (!candles.length) {
-			console.warn("Bootstrap fetch returned no candles for", symbol);
+			logger.warn("bootstrap_no_candles", { symbol, timeframe });
 			return;
 		}
 
@@ -384,7 +389,11 @@ const bootstrapCandles = async (
 			symbol,
 			candles[candles.length - 1]?.timestamp ?? 0
 		);
-		console.info(`Bootstrapped ${candles.length} candles for ${symbol}`);
+		logger.info("bootstrap_candles_loaded", {
+			symbol,
+			timeframe,
+			count: candles.length,
+		});
 	} catch (error) {
 		logMarketDataError(error);
 	}
@@ -411,7 +420,7 @@ const startPolling = async (
 			const latestRaw = candles[candles.length - 1];
 
 			if (!latestRaw) {
-				console.warn("No candle data returned for", symbol);
+				logger.warn("poll_no_candle", { symbol, timeframe });
 			} else {
 				latest = latestRaw;
 			}
@@ -537,7 +546,11 @@ const startPolling = async (
 					fallbackEquity = accountSnapshot.equity;
 				}
 			} else {
-				console.info("No new candle yet for", symbol);
+				logger.debug("poll_no_update", {
+					symbol,
+					timeframe,
+					lastTimestamp,
+				});
 			}
 		}
 
@@ -575,16 +588,7 @@ const maybeHandleForcedExit = async (
 		timestamp: lastCandle.timestamp,
 	};
 
-	console.log(
-		JSON.stringify({
-			event: "strategy_decision",
-			symbol: lastCandle.symbol,
-			timestamp: new Date(lastCandle.timestamp).toISOString(),
-			close: lastCandle.close,
-			intent: "CLOSE_LONG",
-			reason,
-		})
-	);
+	logStrategyDecision(lastCandle, forcedIntent);
 
 	const plan = riskManager.plan(
 		forcedIntent,
@@ -697,20 +701,14 @@ const maybeHandleTrailingStop = async (
 		return false;
 	}
 
-	console.log(
-		JSON.stringify({
-			event: "strategy_decision",
-			intent: "CLOSE_LONG",
-			reason: "trailing_stop_hit",
-		})
-	);
-
 	const forcedIntent: TradeIntent = {
 		symbol,
 		intent: "CLOSE_LONG",
 		reason: "trailing_stop_hit",
 		timestamp: lastCandle.timestamp,
 	};
+
+	logStrategyDecision(lastCandle, forcedIntent);
 
 	const plan = riskManager.plan(
 		forcedIntent,
@@ -778,20 +776,17 @@ const logCandle = (candle: Candle): void => {
 		close: candle.close,
 		volume: candle.volume,
 	};
-	console.info("Latest candle:", payload);
+	logger.debug("latest_candle", payload);
 };
 
 const logStrategyDecision = (candle: Candle, intent: TradeIntent): void => {
-	console.log(
-		JSON.stringify({
-			event: "strategy_decision",
-			symbol: candle.symbol,
-			timestamp: new Date(candle.timestamp).toISOString(),
-			close: candle.close,
-			intent: intent.intent,
-			reason: intent.reason,
-		})
-	);
+	logger.info("strategy_decision", {
+		symbol: candle.symbol,
+		timestamp: new Date(candle.timestamp).toISOString(),
+		close: candle.close,
+		intent: intent.intent,
+		reason: intent.reason,
+	});
 };
 
 const logTradePlan = (
@@ -799,25 +794,22 @@ const logTradePlan = (
 	candle: Candle,
 	intent: TradeIntent
 ): void => {
-	console.log(
-		JSON.stringify({
-			event: "trade_plan",
-			symbol: plan.symbol,
-			timestamp: new Date(candle.timestamp).toISOString(),
-			intent: plan.reason,
-			side: plan.side,
-			quantity: plan.quantity,
-			stopLossPrice: plan.stopLossPrice,
-			takeProfitPrice: plan.takeProfitPrice,
-			recommendations: intent.metadata?.recommendations ?? null,
-		})
-	);
+	logger.info("trade_plan", {
+		symbol: plan.symbol,
+		timestamp: new Date(candle.timestamp).toISOString(),
+		intent: plan.reason,
+		side: plan.side,
+		quantity: plan.quantity,
+		stopLossPrice: plan.stopLossPrice,
+		takeProfitPrice: plan.takeProfitPrice,
+		recommendations: intent.metadata?.recommendations ?? null,
+	});
 };
 
 const logExecutionResult = (result: ExecutionResult): void => {
+	const eventName =
+		result.mode === "paper" ? "paper_execution_result" : "execution_result";
 	const payload: Record<string, unknown> = {
-		event:
-			result.mode === "paper" ? "paper_execution_result" : "execution_result",
 		symbol: result.symbol,
 		side: result.side,
 		quantity: result.quantity,
@@ -832,28 +824,22 @@ const logExecutionResult = (result: ExecutionResult): void => {
 		payload.totalRealizedPnl = result.totalRealizedPnl;
 	}
 
-	console.log(JSON.stringify(payload));
+	logger.info(eventName, payload);
 };
 
 const logExecutionError = (error: unknown, plan: TradePlan): void => {
-	console.error(
-		JSON.stringify({
-			event: "execution_error",
-			symbol: plan.symbol,
-			side: plan.side,
-			quantity: plan.quantity,
-			message: error instanceof Error ? error.message : String(error),
-		})
-	);
+	logger.error("execution_error", {
+		symbol: plan.symbol,
+		side: plan.side,
+		quantity: plan.quantity,
+		message: error instanceof Error ? error.message : String(error),
+	});
 };
 
 const logMarketDataError = (error: unknown): void => {
-	console.error(
-		JSON.stringify({
-			event: "market_data_error",
-			message: error instanceof Error ? error.message : String(error),
-		})
-	);
+	logger.error("market_data_error", {
+		message: error instanceof Error ? error.message : String(error),
+	});
 };
 
 const logExecutionSkipped = (
@@ -861,15 +847,12 @@ const logExecutionSkipped = (
 	positionSide: PositionSide,
 	reason: string
 ): void => {
-	console.log(
-		JSON.stringify({
-			event: "execution_skipped",
-			symbol: planOrIntent.symbol,
-			side: "side" in planOrIntent ? planOrIntent.side : planOrIntent.intent,
-			positionSide,
-			reason,
-		})
-	);
+	logger.info("execution_skipped", {
+		symbol: planOrIntent.symbol,
+		side: "side" in planOrIntent ? planOrIntent.side : planOrIntent.intent,
+		positionSide,
+		reason,
+	});
 };
 
 const getPreExecutionSkipReason = (
@@ -889,22 +872,19 @@ const logPaperPosition = (
 	symbol: string,
 	position: PaperPositionSnapshot
 ): void => {
-	console.log(
-		JSON.stringify({
-			event: "paper_position",
-			symbol,
-			side: position.side,
-			size: position.size,
-			avgEntryPrice: position.avgEntryPrice,
-			realizedPnl: position.realizedPnl,
-			stopLossPrice: position.stopLossPrice,
-			takeProfitPrice: position.takeProfitPrice,
-			entryPrice: position.entryPrice,
-			peakPrice: position.peakPrice,
-			trailingStopPrice: position.trailingStopPrice,
-			isTrailingActive: position.isTrailingActive,
-		})
-	);
+	logger.info("paper_position", {
+		symbol,
+		side: position.side,
+		size: position.size,
+		avgEntryPrice: position.avgEntryPrice,
+		realizedPnl: position.realizedPnl,
+		stopLossPrice: position.stopLossPrice,
+		takeProfitPrice: position.takeProfitPrice,
+		entryPrice: position.entryPrice,
+		peakPrice: position.peakPrice,
+		trailingStopPrice: position.trailingStopPrice,
+		isTrailingActive: position.isTrailingActive,
+	});
 };
 
 const snapshotPaperAccount = (
@@ -943,14 +923,11 @@ const logPaperAccountSnapshot = (
 	timestamp: number,
 	snapshot: PaperAccountSnapshot
 ): void => {
-	console.log(
-		JSON.stringify({
-			event: "paper_account_snapshot",
-			symbol,
-			timestamp: new Date(timestamp).toISOString(),
-			snapshot,
-		})
-	);
+	logger.info("paper_account_snapshot", {
+		symbol,
+		timestamp: new Date(timestamp).toISOString(),
+		snapshot,
+	});
 };
 
 const calculateUnrealizedPnl = (

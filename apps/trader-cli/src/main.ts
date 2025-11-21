@@ -1,77 +1,81 @@
 import {
-	Candle,
-	MultiTimeframeCache,
-	PositionSide,
-	TradeIntent,
-	VWAPDeltaGammaStrategy,
-	createVWAPDeltaGammaCache,
+	StrategyConfig,
+	StrategyId,
+	VWAPDeltaGammaConfig,
+	createLogger,
+	getStrategyDefinition,
 	loadAgenaiConfig,
-	loadVWAPDeltaGammaConfig,
+	resolveStrategySelection,
 } from "@agenai/core";
 import {
 	StartTraderOptions,
-	TraderStrategy,
+	createVwapStrategyBuilder,
 	startTrader,
 } from "@agenai/trader-runtime";
+
+const logger = createLogger("trader-cli");
 
 const main = async (): Promise<void> => {
 	const config = loadAgenaiConfig();
 	const exchange = config.exchange;
-	const strategyChoice = getStrategyArg(process.argv.slice(2));
-	const useVwapStrategy = strategyChoice?.toLowerCase() === "vwapdeltagamma";
-	const vwapConfig = useVwapStrategy ? loadVWAPDeltaGammaConfig() : null;
+	const defaultStrategyId = config.strategy.id as StrategyId;
+	const argv = process.argv.slice(2);
 
-	const symbol =
-		config.env.defaultSymbol ||
-		exchange.defaultSymbol ||
-		config.strategy.symbol;
-	const timeframe = useVwapStrategy
-		? vwapConfig!.timeframes.execution
-		: config.env.defaultTimeframe || config.strategy.timeframe;
+	const selection = resolveStrategySelection({
+		requestedValue: getStrategyArg(argv),
+		envValue: process.env.TRADER_STRATEGY,
+		defaultStrategyId,
+	});
 
-	console.info("AgenAI Trader CLI started");
-	console.info(
-		JSON.stringify({
-			event: "cli_strategy_selection",
-			requestedStrategy: strategyChoice ?? "default",
-			usingVWAPDeltaGamma: useVwapStrategy,
-			defaultStrategyId: config.strategy.id,
-			symbol,
-			timeframe,
-		})
+	selection.invalidSources.forEach(({ source, value }) =>
+		logger.warn("cli_strategy_invalid", { source, value })
 	);
 
-	const traderOptions: StartTraderOptions = { agenaiConfig: config };
-	if (useVwapStrategy && vwapConfig) {
-		const uniqueTimeframes = Array.from(
-			new Set([
-				vwapConfig.timeframes.execution,
-				vwapConfig.timeframes.trend,
-				vwapConfig.timeframes.bias,
-				vwapConfig.timeframes.macro,
-			])
+	let strategyConfig = config.strategy as StrategyConfig;
+	let vwapConfig: VWAPDeltaGammaConfig | null = null;
+	if (selection.resolvedStrategyId === "vwap_delta_gamma") {
+		const definition =
+			getStrategyDefinition<VWAPDeltaGammaConfig>("vwap_delta_gamma");
+		vwapConfig = definition.loadConfig();
+	} else if (strategyConfig.id !== selection.resolvedStrategyId) {
+		const definition = getStrategyDefinition<StrategyConfig>(
+			selection.resolvedStrategyId
 		);
-		traderOptions.strategyBuilder = async (client) => {
-			const cache = createVWAPDeltaGammaCache(
-				(symbolArg, timeframeArg, limit) =>
-					client.fetchOHLCV(symbolArg, timeframeArg, limit),
-				symbol,
-				uniqueTimeframes,
-				vwapConfig.cacheTTLms
-			);
-			await cache.refreshAll();
-			const strategy = new VWAPDeltaGammaStrategy(vwapConfig, { cache });
-			console.info(
-				JSON.stringify({
-					event: "vwap_strategy_initialized",
-					symbol,
-					cacheTimeframes: uniqueTimeframes,
-					cacheTtlMs: vwapConfig.cacheTTLms,
-					strategyClass: strategy.constructor.name,
-				})
-			);
-			return new VwapStrategyAdapter(strategy, cache);
-		};
+		strategyConfig = definition.loadConfig() as StrategyConfig;
+		config.strategy = strategyConfig;
+	}
+
+	const symbol =
+		config.env.defaultSymbol || exchange.defaultSymbol || strategyConfig.symbol;
+	const timeframe =
+		selection.resolvedStrategyId === "vwap_delta_gamma"
+			? vwapConfig!.timeframes.execution
+			: config.env.defaultTimeframe || strategyConfig.timeframe;
+
+	logger.info("cli_started", {
+		defaultStrategyId,
+		resolvedStrategyId: selection.resolvedStrategyId,
+		symbol,
+		timeframe,
+	});
+	logger.info("cli_strategy_selection", {
+		requestedStrategy: selection.requestedValue ?? null,
+		envStrategy: selection.envValue ?? null,
+		defaultStrategyId,
+		resolvedStrategyId: selection.resolvedStrategyId,
+		isDefault: selection.resolvedStrategyId === defaultStrategyId,
+		symbol,
+		timeframe,
+	});
+
+	const traderOptions: StartTraderOptions = {
+		agenaiConfig: config,
+	};
+	if (selection.resolvedStrategyId === "vwap_delta_gamma" && vwapConfig) {
+		traderOptions.strategyBuilder = createVwapStrategyBuilder({
+			symbol,
+			config: vwapConfig,
+		});
 	}
 
 	await startTrader(
@@ -80,25 +84,11 @@ const main = async (): Promise<void> => {
 			timeframe,
 			useTestnet: exchange.testnet ?? false,
 			executionMode: config.env.executionMode,
+			strategyId: selection.resolvedStrategyId,
 		},
 		traderOptions
 	);
 };
-
-class VwapStrategyAdapter implements TraderStrategy {
-	constructor(
-		private readonly strategy: VWAPDeltaGammaStrategy,
-		private readonly cache: MultiTimeframeCache
-	) {}
-
-	async decide(
-		_candles: Candle[],
-		position: PositionSide
-	): Promise<TradeIntent> {
-		await this.cache.refreshAll();
-		return this.strategy.decide(position);
-	}
-}
 
 const getStrategyArg = (argv: string[]): string | undefined => {
 	for (let i = 0; i < argv.length; i += 1) {
@@ -114,6 +104,9 @@ const getStrategyArg = (argv: string[]): string | undefined => {
 };
 
 main().catch((error) => {
-	console.error("Trader CLI failed:", error);
+	logger.error("cli_unhandled_error", {
+		message: error instanceof Error ? error.message : String(error),
+		stack: error instanceof Error ? error.stack : undefined,
+	});
 	process.exit(1);
 });

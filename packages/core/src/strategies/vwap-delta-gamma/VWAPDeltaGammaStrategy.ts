@@ -18,6 +18,10 @@ import {
 	MultiTimeframeCacheOptions,
 	createMTFCache,
 } from "../../data/multiTimeframeCache";
+import { getWorkspaceRoot } from "../../config";
+import { createLogger } from "../../utils/logger";
+
+const strategyLogger = createLogger("vwap-delta-gamma");
 
 export interface VWAPDeltaGammaConfig {
 	name: string;
@@ -145,7 +149,6 @@ export class VWAPDeltaGammaStrategy {
 			executionCandles,
 			vwapContext.daily.value
 		);
-
 		const trendFlags = this.evaluateSetups(
 			latest,
 			prev,
@@ -177,7 +180,6 @@ export class VWAPDeltaGammaStrategy {
 				recommendations
 			);
 		}
-
 		if (position === "SHORT" && trendFlags.shortExitReason) {
 			return this.tradeIntent(
 				latest,
@@ -186,7 +188,6 @@ export class VWAPDeltaGammaStrategy {
 				recommendations
 			);
 		}
-
 		if (position === "FLAT") {
 			if (
 				trendFlags.trendLong ||
@@ -895,54 +896,51 @@ export class VWAPDeltaGammaStrategy {
 			flags: StrategyFlags;
 		}
 	): void {
-		console.log(
-			JSON.stringify({
-				event: "strategy_context",
-				strategy: "VWAPDeltaGamma",
-				symbol: latest.symbol,
-				timeframe: latest.timeframe,
-				timestamp: new Date(latest.timestamp).toISOString(),
-				price: latest.close,
-				vwap: {
-					daily: payload.vwapContext.daily.value,
-					weekly: payload.vwapContext.weekly.value,
-					monthly: payload.vwapContext.monthly.value,
-					rolling50: payload.vwapContext.rolling50.value,
-					rolling200: payload.vwapContext.rolling200.value,
-				},
-				delta: {
-					daily: payload.vwapContext.daily.delta,
-					weekly: payload.vwapContext.weekly.delta,
-					monthly: payload.vwapContext.monthly.delta,
-					rolling50: payload.vwapContext.rolling50.delta,
-					rolling200: payload.vwapContext.rolling200.delta,
-				},
-				atr: {
-					atr1m: payload.atrContext.atr1m,
-					atr5m: payload.atrContext.atr5m,
-					low: payload.atrContext.low,
-					expanding: payload.atrContext.expanding,
-				},
-				bias: payload.mtfBias,
-				regime: {
-					trend: payload.flags.trendRegime,
-					volatility: payload.flags.volatilityRegime,
-				},
-				macdForecast: payload.macdForecast,
-				setups: {
-					trendLong: payload.flags.trendLong,
-					trendShort: payload.flags.trendShort,
-					meanRevLong: payload.flags.meanRevLong,
-					meanRevShort: payload.flags.meanRevShort,
-					breakoutLong: payload.flags.breakoutLong,
-					breakoutShort: payload.flags.breakoutShort,
-				},
-				exits: {
-					long: payload.flags.longExitReason,
-					short: payload.flags.shortExitReason,
-				},
-			})
-		);
+		strategyLogger.info("strategy_context", {
+			strategy: "VWAPDeltaGamma",
+			symbol: latest.symbol,
+			timeframe: latest.timeframe,
+			timestamp: new Date(latest.timestamp).toISOString(),
+			price: latest.close,
+			vwap: {
+				daily: payload.vwapContext.daily.value,
+				weekly: payload.vwapContext.weekly.value,
+				monthly: payload.vwapContext.monthly.value,
+				rolling50: payload.vwapContext.rolling50.value,
+				rolling200: payload.vwapContext.rolling200.value,
+			},
+			delta: {
+				daily: payload.vwapContext.daily.delta,
+				weekly: payload.vwapContext.weekly.delta,
+				monthly: payload.vwapContext.monthly.delta,
+				rolling50: payload.vwapContext.rolling50.delta,
+				rolling200: payload.vwapContext.rolling200.delta,
+			},
+			atr: {
+				atr1m: payload.atrContext.atr1m,
+				atr5m: payload.atrContext.atr5m,
+				low: payload.atrContext.low,
+				expanding: payload.atrContext.expanding,
+			},
+			bias: payload.mtfBias,
+			regime: {
+				trend: payload.flags.trendRegime,
+				volatility: payload.flags.volatilityRegime,
+			},
+			macdForecast: payload.macdForecast,
+			setups: {
+				trendLong: payload.flags.trendLong,
+				trendShort: payload.flags.trendShort,
+				meanRevLong: payload.flags.meanRevLong,
+				meanRevShort: payload.flags.meanRevShort,
+				breakoutLong: payload.flags.breakoutLong,
+				breakoutShort: payload.flags.breakoutShort,
+			},
+			exits: {
+				long: payload.flags.longExitReason,
+				short: payload.flags.shortExitReason,
+			},
+		});
 	}
 }
 
@@ -961,7 +959,7 @@ export const createVWAPDeltaGammaCache = (
 
 export const loadVWAPDeltaGammaConfig = (
 	configPath = path.join(
-		process.cwd(),
+		getWorkspaceRoot(),
 		"configs",
 		"strategies",
 		"vwap-delta-gamma.json"

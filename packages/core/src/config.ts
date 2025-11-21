@@ -2,6 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import dotenv from "dotenv";
 
+import type { StrategyId } from "./strategies/ids";
+export type { StrategyId } from "./strategies/ids";
+
 let envLoaded = false;
 let loadedEnvPath: string | undefined;
 let cachedWorkspaceRoot: string | undefined;
@@ -16,8 +19,6 @@ interface ExchangeConfigFile {
 	wsEndpoint: string;
 	defaultSymbol: string;
 }
-
-export type StrategyId = "macd_ar4_v2" | "momentum_v3";
 
 interface StrategyIndicatorConfigFile {
 	emaFast?: number;
@@ -265,6 +266,8 @@ const findWorkspaceRoot = (): string => {
 	cachedWorkspaceRoot = current;
 	return current;
 };
+
+export const getWorkspaceRoot = (): string => findWorkspaceRoot();
 
 const getDefaultEnvPath = (): string => path.join(findWorkspaceRoot(), ".env");
 const getDefaultConfigDir = (): string =>
