@@ -39,6 +39,22 @@ type StrategyDefinitionMap = {
 	>;
 };
 
+type StrategyEngineModule = {
+	MacdAr4Strategy: StrategyConstructor;
+	MomentumV3Strategy: StrategyConstructor;
+};
+
+const STRATEGY_ENGINE_MODULE_ID = "@agenai/strategy-engine";
+
+const loadStrategyEngineModule = async (): Promise<StrategyEngineModule> => {
+	const moduleId: string = STRATEGY_ENGINE_MODULE_ID;
+	const mod = (await import(moduleId)) as Partial<StrategyEngineModule>;
+	if (!mod.MacdAr4Strategy || !mod.MomentumV3Strategy) {
+		throw new Error("Failed to load @agenai/strategy-engine exports");
+	}
+	return mod as StrategyEngineModule;
+};
+
 const ensureStrategyId = (
 	expected: StrategyId,
 	actual: StrategyId,
@@ -67,7 +83,7 @@ const strategyRegistry: StrategyDefinitionMap = {
 			return config;
 		},
 		resolveStrategyClass: async () =>
-			(await import("@agenai/strategy-engine")).MacdAr4Strategy,
+			(await loadStrategyEngineModule()).MacdAr4Strategy,
 	},
 	momentum_v3: {
 		id: "momentum_v3",
@@ -82,7 +98,7 @@ const strategyRegistry: StrategyDefinitionMap = {
 			return config;
 		},
 		resolveStrategyClass: async () =>
-			(await import("@agenai/strategy-engine")).MomentumV3Strategy,
+			(await loadStrategyEngineModule()).MomentumV3Strategy,
 	},
 	vwap_delta_gamma: {
 		id: "vwap_delta_gamma",

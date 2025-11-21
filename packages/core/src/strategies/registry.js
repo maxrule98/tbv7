@@ -44,6 +44,15 @@ const ensureStrategyId = (expected, actual, profile) => {
         throw new Error(`Strategy profile ${profile ?? "default"} resolved to ${actual}, expected ${expected}`);
     }
 };
+const STRATEGY_ENGINE_MODULE_ID = "@agenai/strategy-engine";
+const loadStrategyEngineModule = async () => {
+    const moduleId = STRATEGY_ENGINE_MODULE_ID;
+    const mod = await Promise.resolve().then(() => __importStar(require(moduleId)));
+    if (!mod.MacdAr4Strategy || !mod.MomentumV3Strategy) {
+        throw new Error("Failed to load @agenai/strategy-engine exports");
+    }
+    return mod;
+};
 const strategyRegistry = {
     macd_ar4_v2: {
         id: "macd_ar4_v2",
@@ -54,7 +63,7 @@ const strategyRegistry = {
             ensureStrategyId("macd_ar4_v2", config.id, profile);
             return config;
         },
-        resolveStrategyClass: async () => (await Promise.resolve().then(() => __importStar(require("@agenai/strategy-engine")))).MacdAr4Strategy,
+        resolveStrategyClass: async () => (await loadStrategyEngineModule()).MacdAr4Strategy,
     },
     momentum_v3: {
         id: "momentum_v3",
@@ -65,7 +74,7 @@ const strategyRegistry = {
             ensureStrategyId("momentum_v3", config.id, profile);
             return config;
         },
-        resolveStrategyClass: async () => (await Promise.resolve().then(() => __importStar(require("@agenai/strategy-engine")))).MomentumV3Strategy,
+        resolveStrategyClass: async () => (await loadStrategyEngineModule()).MomentumV3Strategy,
     },
     vwap_delta_gamma: {
         id: "vwap_delta_gamma",
