@@ -58,6 +58,23 @@ export interface TraderStrategy {
 	decide: (candles: Candle[], position: PositionSide) => Promise<TradeIntent>;
 }
 
+type StrategySource = "override" | "builder" | "config";
+
+interface StrategyLogContext {
+	source: StrategySource;
+	strategy: TraderStrategy;
+	strategyConfig?: StrategyConfig;
+	traderConfig: TraderConfig;
+	executionMode: ExecutionMode;
+	builderName?: string;
+	profiles?: {
+		account?: string;
+		strategy?: string;
+		risk?: string;
+		exchange?: string;
+	};
+}
+
 export const startTrader = async (
 	traderConfig: TraderConfig,
 	options: StartTraderOptions = {}
@@ -84,6 +101,11 @@ export const startTrader = async (
 		useFutures: true,
 	});
 
+	const strategySource: StrategySource = options.strategyOverride
+		? "override"
+		: options.strategyBuilder
+		? "builder"
+		: "config";
 	const strategy = options.strategyOverride
 		? options.strategyOverride
 		: options.strategyBuilder
@@ -110,6 +132,21 @@ export const startTrader = async (
 			useTestnet: traderConfig.useTestnet,
 		})
 	);
+	logStrategyLoaded({
+		source: strategySource,
+		strategy,
+		strategyConfig:
+			strategySource === "config" ? agenaiConfig.strategy : undefined,
+		traderConfig,
+		executionMode,
+		builderName: options.strategyBuilder?.name,
+		profiles: {
+			account: options.accountProfile,
+			strategy: options.strategyProfile,
+			risk: options.riskProfile,
+			exchange: options.exchangeProfile,
+		},
+	});
 	logRiskConfig(agenaiConfig.risk);
 
 	const candlesBySymbol = new Map<string, Candle[]>();
@@ -277,6 +314,40 @@ const deriveTrendFromHistogram = (
 		isBear,
 		isNeutral: !isBull && !isBear,
 	};
+};
+
+const getStrategyName = (strategy: TraderStrategy): string => {
+	const ctorName =
+		(strategy as { constructor?: { name?: string } })?.constructor?.name ??
+		"AnonymousStrategy";
+	return ctorName === "Object" ? "AnonymousStrategy" : ctorName;
+};
+
+const logStrategyLoaded = ({
+	source,
+	strategy,
+	strategyConfig,
+	traderConfig,
+	executionMode,
+	builderName,
+	profiles,
+}: StrategyLogContext): void => {
+	const pollInterval = traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+	console.info(
+		JSON.stringify({
+			event: "strategy_loaded",
+			source,
+			strategyId: strategyConfig?.id ?? null,
+			strategyClass: getStrategyName(strategy),
+			symbol: traderConfig.symbol,
+			timeframe: traderConfig.timeframe,
+			executionMode,
+			useTestnet: traderConfig.useTestnet,
+			pollIntervalMs: pollInterval,
+			builder: builderName ?? null,
+			profiles: profiles ?? null,
+		})
+	);
 };
 
 const logRiskConfig = (risk: RiskConfig): void => {

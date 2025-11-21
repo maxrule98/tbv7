@@ -30,6 +30,16 @@ const main = async (): Promise<void> => {
 		: config.env.defaultTimeframe || config.strategy.timeframe;
 
 	console.info("AgenAI Trader CLI started");
+	console.info(
+		JSON.stringify({
+			event: "cli_strategy_selection",
+			requestedStrategy: strategyChoice ?? "default",
+			usingVWAPDeltaGamma: useVwapStrategy,
+			defaultStrategyId: config.strategy.id,
+			symbol,
+			timeframe,
+		})
+	);
 
 	const traderOptions: StartTraderOptions = { agenaiConfig: config };
 	if (useVwapStrategy && vwapConfig) {
@@ -51,6 +61,15 @@ const main = async (): Promise<void> => {
 			);
 			await cache.refreshAll();
 			const strategy = new VWAPDeltaGammaStrategy(vwapConfig, { cache });
+			console.info(
+				JSON.stringify({
+					event: "vwap_strategy_initialized",
+					symbol,
+					cacheTimeframes: uniqueTimeframes,
+					cacheTtlMs: vwapConfig.cacheTTLms,
+					strategyClass: strategy.constructor.name,
+				})
+			);
 			return new VwapStrategyAdapter(strategy, cache);
 		};
 	}
