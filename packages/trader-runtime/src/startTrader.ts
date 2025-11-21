@@ -50,9 +50,11 @@ export interface StartTraderOptions {
 	exchangeProfile?: string;
 	strategyProfile?: string;
 	riskProfile?: string;
+	strategyOverride?: TraderStrategy;
+	strategyBuilder?: (client: MexcClient) => Promise<TraderStrategy>;
 }
 
-interface TraderStrategy {
+export interface TraderStrategy {
 	decide: (candles: Candle[], position: PositionSide) => Promise<TradeIntent>;
 }
 
@@ -82,7 +84,11 @@ export const startTrader = async (
 		useFutures: true,
 	});
 
-	const strategy = createStrategyInstance(client, agenaiConfig.strategy);
+	const strategy = options.strategyOverride
+		? options.strategyOverride
+		: options.strategyBuilder
+		? await options.strategyBuilder(client)
+		: createStrategyInstance(client, agenaiConfig.strategy);
 	const riskManager = new RiskManager(agenaiConfig.risk);
 	const paperAccount =
 		executionMode === "paper"
@@ -426,7 +432,7 @@ const startPolling = async (
 						if (skipReason) {
 							logExecutionSkipped(plan, positionState.side, skipReason);
 						} else {
-							logTradePlan(plan, latest);
+							logTradePlan(plan, latest, intent);
 							try {
 								const result = await executionEngine.execute(plan, {
 									price: latest.close,
@@ -530,7 +536,7 @@ const maybeHandleForcedExit = async (
 		return true;
 	}
 
-	logTradePlan(plan, lastCandle);
+	logTradePlan(plan, lastCandle, forcedIntent);
 	try {
 		const result = await executionEngine.execute(plan, {
 			price: lastCandle.close,
@@ -656,7 +662,7 @@ const maybeHandleTrailingStop = async (
 		return true;
 	}
 
-	logTradePlan(plan, lastCandle);
+	logTradePlan(plan, lastCandle, forcedIntent);
 	try {
 		const result = await executionEngine.execute(plan, {
 			price: lastCandle.close,
@@ -717,7 +723,11 @@ const logStrategyDecision = (candle: Candle, intent: TradeIntent): void => {
 	);
 };
 
-const logTradePlan = (plan: TradePlan, candle: Candle): void => {
+const logTradePlan = (
+	plan: TradePlan,
+	candle: Candle,
+	intent: TradeIntent
+): void => {
 	console.log(
 		JSON.stringify({
 			event: "trade_plan",
@@ -728,6 +738,7 @@ const logTradePlan = (plan: TradePlan, candle: Candle): void => {
 			quantity: plan.quantity,
 			stopLossPrice: plan.stopLossPrice,
 			takeProfitPrice: plan.takeProfitPrice,
+			recommendations: intent.metadata?.recommendations ?? null,
 		})
 	);
 };

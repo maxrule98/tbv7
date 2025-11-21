@@ -1,0 +1,19 @@
+{
+	"name": "VWAPDeltaGamma",
+	"timeframes": {
+		"execution": "1m",
+		"trend": "5m",
+		"bias": "15m",
+		"macro": "1h"
+	},
+	"atrPeriod1m": 14,
+	"atrPeriod5m": 14,
+	"vwapRollingShort": 50,
+	"vwapRollingLong": 200,
+	"atrLowThreshold": 0.5,
+	"atrExpansionThreshold": 1.2,
+	"deltaExtremeMultiplier": 2,
+	"minPullbackDistance": 0.1,
+	"macdForecastDeadband": 0,
+	"cacheTTLms": 45000
+}

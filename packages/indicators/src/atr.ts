@@ -46,3 +46,13 @@ const computeTrueRanges = (candles: AtrInput[]): number[] => {
 	}
 	return trueRanges;
 };
+
+export const calculateAtr1m = (
+	candles: AtrInput[],
+	period = 14
+): number | null => calculateATR(candles, period);
+
+export const calculateAtr5m = (
+	candles: AtrInput[],
+	period = 14
+): number | null => calculateATR(candles, period);

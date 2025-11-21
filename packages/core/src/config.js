@@ -90,9 +90,86 @@ const loadExchangeConfig = (env, configDir = getDefaultConfigDir(), exchangeProf
 exports.loadExchangeConfig = loadExchangeConfig;
 const loadStrategyConfig = (configDir = getDefaultConfigDir(), strategyProfile = "macd_ar4") => {
     const strategyPath = node_path_1.default.join(configDir, "strategies", `${strategyProfile}.json`);
-    return readJsonFile(strategyPath);
+    const file = readJsonFile(strategyPath);
+    const strategyId = file.id === "momentum_v3" ? "momentum_v3" : "macd_ar4_v2";
+    return strategyId === "momentum_v3"
+        ? normalizeMomentumV3Config(file)
+        : normalizeMacdAr4Config(file);
 };
 exports.loadStrategyConfig = loadStrategyConfig;
+const normalizeMacdAr4Config = (file) => {
+    const indicatorFile = file.indicators ?? {};
+    const thresholdFile = file.thresholds ?? {};
+    const indicators = {
+        emaFast: indicatorFile.emaFast ?? 12,
+        emaSlow: indicatorFile.emaSlow ?? 26,
+        signal: indicatorFile.signal ?? 9,
+        pullbackFast: indicatorFile.pullbackFast ?? 9,
+        pullbackSlow: indicatorFile.pullbackSlow ?? 21,
+        atrPeriod: indicatorFile.atrPeriod ?? 14,
+        rsiPeriod: indicatorFile.rsiPeriod ?? 14,
+        arWindow: indicatorFile.arWindow ?? 20,
+    };
+    const thresholds = {
+        minForecast: thresholdFile.minForecast ?? 0,
+        minAtr: thresholdFile.minAtr ?? 8,
+        maxAtr: thresholdFile.maxAtr ?? 80,
+        rsiLongLower: thresholdFile.rsiLongLower ?? 40,
+        rsiLongUpper: thresholdFile.rsiLongUpper ?? 70,
+        rsiShortLower: thresholdFile.rsiShortLower ?? 30,
+        rsiShortUpper: thresholdFile.rsiShortUpper ?? 60,
+        htfHistogramDeadband: thresholdFile.htfHistogramDeadband ?? 0.0005,
+    };
+    return {
+        id: "macd_ar4_v2",
+        symbol: file.symbol,
+        timeframe: file.timeframe,
+        mode: file.mode ?? "long-only",
+        higherTimeframe: file.higherTimeframe ?? "15m",
+        htfCacheMs: file.htfCacheMs ?? 60000,
+        indicators,
+        thresholds,
+    };
+};
+const normalizeMomentumV3Config = (file) => {
+    const htfFile = file.htf ?? {};
+    const atrFile = file.atr ?? {};
+    const volumeFile = file.volume ?? {};
+    const breakoutFile = file.breakout ?? {};
+    const rsiFile = file.rsi ?? {};
+    return {
+        id: "momentum_v3",
+        symbol: file.symbol,
+        timeframe: file.timeframe,
+        mode: file.mode ?? "long-only",
+        htfCacheMs: file.htfCacheMs ?? 60000,
+        htf: {
+            timeframe: htfFile.timeframe ?? "15m",
+            macdFast: htfFile.macdFast ?? 12,
+            macdSlow: htfFile.macdSlow ?? 26,
+            macdSignal: htfFile.macdSignal ?? 9,
+            deadband: htfFile.deadband ?? 0,
+        },
+        atr: {
+            period: atrFile.period ?? 14,
+            emaPeriod: atrFile.emaPeriod ?? 20,
+        },
+        volume: {
+            smaPeriod: volumeFile.smaPeriod ?? 20,
+            spikeMultiplier: volumeFile.spikeMultiplier ?? 1.2,
+        },
+        breakout: {
+            lookback: breakoutFile.lookback ?? 20,
+        },
+        rsi: {
+            period: rsiFile.period ?? 14,
+            longMin: rsiFile.longMin ?? 45,
+            longMax: rsiFile.longMax ?? 70,
+            shortMin: rsiFile.shortMin ?? 20,
+            shortMax: rsiFile.shortMax ?? 55,
+        },
+    };
+};
 const loadRiskConfig = (configDir = getDefaultConfigDir(), riskProfile = "default") => {
     const riskPath = node_path_1.default.join(configDir, "risk", `${riskProfile}.json`);
     const file = readJsonFile(riskPath);

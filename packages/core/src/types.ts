@@ -23,4 +23,5 @@ export interface TradeIntent {
 	intent: TradeIntentType;
 	reason: string;
 	timestamp?: number;
+	metadata?: Record<string, unknown>;
 }

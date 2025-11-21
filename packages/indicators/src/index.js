@@ -35,3 +35,5 @@ __exportStar(require("./macd"), exports);
 __exportStar(require("./atr"), exports);
 __exportStar(require("./rsi"), exports);
 __exportStar(require("./sma"), exports);
+__exportStar(require("./vwap"), exports);
+__exportStar(require("./deltaGamma"), exports);

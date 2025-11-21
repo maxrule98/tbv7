@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.startTrader = exports.DEFAULT_POLL_INTERVAL_MS = void 0;
 const core_1 = require("@agenai/core");
+const indicators_1 = require("@agenai/indicators");
 const exchange_mexc_1 = require("@agenai/exchange-mexc");
 const execution_engine_1 = require("@agenai/execution-engine");
 const risk_engine_1 = require("@agenai/risk-engine");
@@ -24,13 +25,11 @@ const startTrader = async (traderConfig, options = {}) => {
         secret: agenaiConfig.exchange.credentials.apiSecret,
         useFutures: true,
     });
-    const strategy = new strategy_engine_1.MacdAr4Strategy({
-        emaFast: 12,
-        emaSlow: 26,
-        signal: 9,
-        arWindow: 20,
-        minForecast: 0,
-    });
+    const strategy = options.strategyOverride
+        ? options.strategyOverride
+        : options.strategyBuilder
+            ? await options.strategyBuilder(client)
+            : createStrategyInstance(client, agenaiConfig.strategy);
     const riskManager = new risk_engine_1.RiskManager(agenaiConfig.risk);
     const paperAccount = executionMode === "paper"
         ? new execution_engine_1.PaperAccount(accountConfig.startingBalance)
@@ -55,6 +54,106 @@ const startTrader = async (traderConfig, options = {}) => {
     return startPolling(client, strategy, riskManager, agenaiConfig.risk, executionEngine, initialEquity, traderConfig.symbol, traderConfig.timeframe, candlesBySymbol, lastTimestampBySymbol, traderConfig.pollIntervalMs ?? exports.DEFAULT_POLL_INTERVAL_MS);
 };
 exports.startTrader = startTrader;
+const buildMacdAr4RuntimeConfig = (strategyConfig) => {
+    const { indicators, thresholds, higherTimeframe } = strategyConfig;
+    return {
+        emaFast: indicators.emaFast,
+        emaSlow: indicators.emaSlow,
+        signal: indicators.signal,
+        arWindow: indicators.arWindow,
+        minForecast: thresholds.minForecast,
+        pullbackFast: indicators.pullbackFast,
+        pullbackSlow: indicators.pullbackSlow,
+        atrPeriod: indicators.atrPeriod,
+        minAtr: thresholds.minAtr,
+        maxAtr: thresholds.maxAtr,
+        rsiPeriod: indicators.rsiPeriod,
+        rsiLongRange: [thresholds.rsiLongLower, thresholds.rsiLongUpper],
+        rsiShortRange: [thresholds.rsiShortLower, thresholds.rsiShortUpper],
+        higherTimeframe,
+    };
+};
+const buildMomentumV3RuntimeConfig = (strategyConfig) => {
+    return {
+        atrPeriod: strategyConfig.atr.period,
+        atrEmaPeriod: strategyConfig.atr.emaPeriod,
+        volumeSmaPeriod: strategyConfig.volume.smaPeriod,
+        volumeSpikeMultiplier: strategyConfig.volume.spikeMultiplier,
+        breakoutLookback: strategyConfig.breakout.lookback,
+        rsiPeriod: strategyConfig.rsi.period,
+        rsiLongRange: [strategyConfig.rsi.longMin, strategyConfig.rsi.longMax],
+        rsiShortRange: [strategyConfig.rsi.shortMin, strategyConfig.rsi.shortMax],
+        macdFast: strategyConfig.htf.macdFast,
+        macdSlow: strategyConfig.htf.macdSlow,
+        macdSignal: strategyConfig.htf.macdSignal,
+        htfTimeframe: strategyConfig.htf.timeframe,
+    };
+};
+const createStrategyInstance = (client, strategyConfig) => {
+    if (strategyConfig.id === "momentum_v3") {
+        const runtimeConfig = buildMomentumV3RuntimeConfig(strategyConfig);
+        const getHTFTrend = createHigherTimeframeTrendFetcher(client, {
+            timeframe: strategyConfig.htf.timeframe,
+            cacheMs: strategyConfig.htfCacheMs,
+            deadband: strategyConfig.htf.deadband,
+            emaFast: strategyConfig.htf.macdFast,
+            emaSlow: strategyConfig.htf.macdSlow,
+            signal: strategyConfig.htf.macdSignal,
+        });
+        return new strategy_engine_1.MomentumV3Strategy(runtimeConfig, { getHTFTrend });
+    }
+    const macdConfig = buildMacdAr4RuntimeConfig(strategyConfig);
+    const getHTFTrend = createHigherTimeframeTrendFetcher(client, {
+        timeframe: macdConfig.higherTimeframe,
+        cacheMs: strategyConfig.htfCacheMs,
+        deadband: strategyConfig.thresholds.htfHistogramDeadband,
+        emaFast: macdConfig.emaFast,
+        emaSlow: macdConfig.emaSlow,
+        signal: macdConfig.signal,
+    });
+    return new strategy_engine_1.MacdAr4Strategy(macdConfig, { getHTFTrend });
+};
+const createHigherTimeframeTrendFetcher = (client, options) => {
+    const cache = new Map();
+    const lookback = Math.max(options.emaSlow * 4, 300);
+    return async (symbol, timeframe = options.timeframe) => {
+        const now = Date.now();
+        const cached = cache.get(symbol);
+        if (cached && now - cached.fetchedAt < options.cacheMs) {
+            return cached.trend;
+        }
+        try {
+            const candles = await client.fetchOHLCV(symbol, timeframe, lookback);
+            const closes = candles.map((candle) => candle.close);
+            const macdResult = (0, indicators_1.macd)(closes, options.emaFast, options.emaSlow, options.signal);
+            const trend = deriveTrendFromHistogram(macdResult.histogram, options.deadband);
+            cache.set(symbol, { trend, fetchedAt: now });
+            return trend;
+        }
+        catch (error) {
+            console.error(JSON.stringify({
+                event: "htf_trend_error",
+                symbol,
+                timeframe,
+                message: error instanceof Error ? error.message : String(error),
+            }));
+            return cached?.trend ?? null;
+        }
+    };
+};
+const deriveTrendFromHistogram = (histogram, deadband) => {
+    if (histogram === null) {
+        return { macdHist: null, isBull: false, isBear: false, isNeutral: true };
+    }
+    const isBull = histogram > deadband;
+    const isBear = histogram < -deadband;
+    return {
+        macdHist: histogram,
+        isBull,
+        isBear,
+        isNeutral: !isBull && !isBear,
+    };
+};
 const logRiskConfig = (risk) => {
     console.log(JSON.stringify({
         event: "risk_config",
@@ -127,7 +226,7 @@ const startPolling = async (client, strategy, riskManager, riskConfig, execution
                     await delay(pollIntervalMs);
                     continue;
                 }
-                const intent = strategy.decide(buffer, positionState.side);
+                const intent = await strategy.decide(buffer, positionState.side);
                 logStrategyDecision(latest, intent);
                 if (intent.intent === "OPEN_LONG" || intent.intent === "CLOSE_LONG") {
                     const plan = riskManager.plan(intent, latest.close, accountEquity, positionState.size);
@@ -142,7 +241,7 @@ const startPolling = async (client, strategy, riskManager, riskConfig, execution
                             logExecutionSkipped(plan, positionState.side, skipReason);
                         }
                         else {
-                            logTradePlan(plan, latest);
+                            logTradePlan(plan, latest, intent);
                             try {
                                 const result = await executionEngine.execute(plan, {
                                     price: latest.close,
@@ -210,7 +309,7 @@ const maybeHandleForcedExit = async (positionState, lastCandle, riskManager, exe
         logExecutionSkipped(plan, positionState.side, skipReason);
         return true;
     }
-    logTradePlan(plan, lastCandle);
+    logTradePlan(plan, lastCandle, forcedIntent);
     try {
         const result = await executionEngine.execute(plan, {
             price: lastCandle.close,
@@ -295,7 +394,7 @@ const maybeHandleTrailingStop = async (symbol, positionState, lastCandle, riskMa
         logExecutionSkipped(plan, positionState.side, skipReason);
         return true;
     }
-    logTradePlan(plan, lastCandle);
+    logTradePlan(plan, lastCandle, forcedIntent);
     try {
         const result = await executionEngine.execute(plan, {
             price: lastCandle.close,
@@ -344,7 +443,7 @@ const logStrategyDecision = (candle, intent) => {
         reason: intent.reason,
     }));
 };
-const logTradePlan = (plan, candle) => {
+const logTradePlan = (plan, candle, intent) => {
     console.log(JSON.stringify({
         event: "trade_plan",
         symbol: plan.symbol,
@@ -354,6 +453,7 @@ const logTradePlan = (plan, candle) => {
         quantity: plan.quantity,
         stopLossPrice: plan.stopLossPrice,
         takeProfitPrice: plan.takeProfitPrice,
+        recommendations: intent.metadata?.recommendations ?? null,
     }));
 };
 const logExecutionResult = (result) => {
