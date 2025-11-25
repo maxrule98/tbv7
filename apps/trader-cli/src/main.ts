@@ -1,25 +1,39 @@
-import { StrategyId, createLogger, loadAgenaiConfig } from "@agenai/core";
-import { createVwapStrategyBuilder, startTrader } from "@agenai/trader-runtime";
+import {
+	StrategyConfig,
+	StrategyId,
+	createLogger,
+	getStrategyDefinition,
+	loadAgenaiConfig,
+	resolveStrategySelection,
+} from "@agenai/core";
+import { startTrader } from "@agenai/trader-runtime";
 
 const logger = createLogger("trader-cli");
-
-const SUPPORTED_STRATEGY_ID: StrategyId = "vwap_delta_gamma";
 
 const main = async (): Promise<void> => {
 	const config = loadAgenaiConfig();
 	const exchange = config.exchange;
 	const argv = process.argv.slice(2);
+	const defaultStrategyId = config.strategy.id as StrategyId;
 
-	const requestedStrategy =
-		getStrategyArg(argv) ?? process.env.TRADER_STRATEGY ?? undefined;
-	if (requestedStrategy && requestedStrategy !== SUPPORTED_STRATEGY_ID) {
-		logger.warn("cli_strategy_override_ignored", {
-			requestedStrategy,
-			supportedStrategy: SUPPORTED_STRATEGY_ID,
-		});
+	const selection = resolveStrategySelection({
+		requestedValue: getStrategyArg(argv),
+		envValue: process.env.TRADER_STRATEGY,
+		defaultStrategyId,
+	});
+
+	selection.invalidSources.forEach(({ source, value }) =>
+		logger.warn("cli_strategy_invalid", { source, value })
+	);
+
+	let strategyConfig = config.strategy as StrategyConfig;
+	if (selection.resolvedStrategyId !== strategyConfig.id) {
+		const definition = getStrategyDefinition<StrategyConfig>(
+			selection.resolvedStrategyId
+		);
+		strategyConfig = definition.loadConfig();
+		config.strategy = strategyConfig;
 	}
-
-	const strategyConfig = config.strategy;
 	const symbol =
 		config.env.defaultSymbol ||
 		exchange.defaultSymbol ||
@@ -29,10 +43,12 @@ const main = async (): Promise<void> => {
 		config.env.defaultTimeframe || strategyConfig.timeframes.execution;
 
 	logger.info("cli_starting", {
-		resolvedStrategyId: SUPPORTED_STRATEGY_ID,
+		defaultStrategyId,
+		resolvedStrategyId: selection.resolvedStrategyId,
 		symbol,
 		timeframe,
-		requestedStrategy: requestedStrategy ?? null,
+		requestedStrategy: selection.requestedValue ?? null,
+		envStrategy: selection.envValue ?? null,
 		useTestnet: exchange.testnet ?? false,
 	});
 
@@ -42,15 +58,9 @@ const main = async (): Promise<void> => {
 			timeframe,
 			useTestnet: exchange.testnet ?? false,
 			executionMode: config.env.executionMode,
-			strategyId: SUPPORTED_STRATEGY_ID,
+			strategyId: selection.resolvedStrategyId,
 		},
-		{
-			agenaiConfig: config,
-			strategyBuilder: createVwapStrategyBuilder({
-				symbol,
-				config: strategyConfig,
-			}),
-		}
+		{ agenaiConfig: config }
 	);
 };
 

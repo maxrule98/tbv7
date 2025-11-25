@@ -1,27 +1,42 @@
 import http from "http";
-import { StrategyId, createLogger, loadAgenaiConfig } from "@agenai/core";
-import { createVwapStrategyBuilder, startTrader } from "@agenai/trader-runtime";
+import {
+	StrategyConfig,
+	StrategyId,
+	createLogger,
+	getStrategyDefinition,
+	loadAgenaiConfig,
+	resolveStrategySelection,
+} from "@agenai/core";
+import { startTrader } from "@agenai/trader-runtime";
 
 const logger = createLogger("trader-server");
-
-const SUPPORTED_STRATEGY_ID: StrategyId = "vwap_delta_gamma";
 
 const main = async (): Promise<void> => {
 	console.info("Starting AgenAI Trader Server...");
 
 	const config = loadAgenaiConfig();
 	const exchange = config.exchange;
+	const defaultStrategyId = config.strategy.id as StrategyId;
 	const argv = process.argv.slice(2);
-	const requestedStrategy =
-		getStrategyArg(argv) ?? process.env.TRADER_STRATEGY ?? undefined;
-	if (requestedStrategy && requestedStrategy !== SUPPORTED_STRATEGY_ID) {
-		logger.warn("server_strategy_override_ignored", {
-			requestedStrategy,
-			supportedStrategy: SUPPORTED_STRATEGY_ID,
-		});
-	}
 
-	const strategyConfig = config.strategy;
+	const selection = resolveStrategySelection({
+		requestedValue: getStrategyArg(argv),
+		envValue: process.env.TRADER_STRATEGY,
+		defaultStrategyId,
+	});
+
+	selection.invalidSources.forEach(({ source, value }) =>
+		logger.warn("server_strategy_invalid", { source, value })
+	);
+
+	let strategyConfig = config.strategy as StrategyConfig;
+	if (selection.resolvedStrategyId !== strategyConfig.id) {
+		const definition = getStrategyDefinition<StrategyConfig>(
+			selection.resolvedStrategyId
+		);
+		strategyConfig = definition.loadConfig();
+		config.strategy = strategyConfig;
+	}
 	const symbol =
 		config.env.defaultSymbol ||
 		exchange.defaultSymbol ||
@@ -36,15 +51,9 @@ const main = async (): Promise<void> => {
 			timeframe,
 			useTestnet: exchange.testnet ?? false,
 			executionMode: config.env.executionMode,
-			strategyId: SUPPORTED_STRATEGY_ID,
+			strategyId: selection.resolvedStrategyId,
 		},
-		{
-			agenaiConfig: config,
-			strategyBuilder: createVwapStrategyBuilder({
-				symbol,
-				config: strategyConfig,
-			}),
-		}
+		{ agenaiConfig: config }
 	).catch((error) => {
 		console.error("Trader runtime failed:", error);
 		process.exit(1);

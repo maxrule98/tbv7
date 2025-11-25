@@ -8,8 +8,14 @@ build
 .DS_Store
 */**/node_modules
 
-# Build artifacts - ensure src/ stays clean
-packages/*/src/*.js
-packages/*/src/*.d.ts
-apps/*/src/*.js
-apps/*/src/*.d.ts
+# Build output
+**/dist/
+
+# Compiled artifacts generated from TypeScript sources
+**/src/**/*.js
+**/src/**/*.d.ts
+
+# Allow root-level config/test scripts when needed
+!/jest.config.js
+!/vitest.config.js
+!/*.config.js

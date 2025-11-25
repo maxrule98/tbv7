@@ -21,7 +21,7 @@ import {
 	PaperPositionSnapshot,
 } from "@agenai/execution-engine";
 import { RiskManager, TradePlan } from "@agenai/risk-engine";
-import { createVwapStrategyBuilder } from "./vwapStrategyBuilder";
+import { resolveStrategyBuilder } from "./strategyBuilders";
 import type { TraderStrategy } from "./types";
 export type { TraderStrategy } from "./types";
 
@@ -99,9 +99,10 @@ export const startTrader = async (
 
 	const effectiveBuilder =
 		options.strategyBuilder ??
-		createVwapStrategyBuilder({
+		resolveStrategyBuilder(resolvedStrategyId, {
+			strategyConfig: agenaiConfig.strategy,
 			symbol: traderConfig.symbol,
-			config: agenaiConfig.strategy,
+			timeframe: traderConfig.timeframe,
 		});
 
 	const strategySource: StrategySource = options.strategyOverride

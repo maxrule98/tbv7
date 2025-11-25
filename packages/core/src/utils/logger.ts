@@ -7,6 +7,9 @@ const LEVELS: Record<LogLevel, number> = {
 	error: 40,
 };
 
+const prettyLogsEnabled = process.env.LOG_PRETTY === "true";
+// LOG_PRETTY=true → pretty-print JSON log bodies for local debugging
+
 const normalizeLevel = (value?: string): LogLevel => {
 	if (!value) {
 		return "info";
@@ -44,7 +47,7 @@ const shouldLog = (level: LogLevel, moduleName: string): boolean => {
 
 const serialize = (payload: Record<string, unknown>): string => {
 	try {
-		return JSON.stringify(payload);
+		return JSON.stringify(payload, null, prettyLogsEnabled ? 2 : undefined);
 	} catch (error) {
 		return JSON.stringify({
 			level: "error",
