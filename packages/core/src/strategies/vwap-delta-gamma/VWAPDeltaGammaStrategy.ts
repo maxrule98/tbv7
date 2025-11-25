@@ -41,6 +41,11 @@ export interface VWAPDeltaGammaConfig {
 	minPullbackDistance: number;
 	macdForecastDeadband: number;
 	cacheTTLms: number;
+	atr?: {
+		requireExpansionForTrend?: boolean;
+		minAtr1m?: number;
+		minAtr5m?: number;
+	};
 }
 
 export interface VWAPDeltaGammaStrategyDependencies {
@@ -106,10 +111,112 @@ interface StrategyRecommendations {
 	breakoutShort?: RecommendationLevels;
 }
 
+interface TrendLongChecks {
+	priceAboveAllVwaps: boolean;
+	delta200Positive: boolean;
+	gamma200Positive: boolean;
+	pullbackToVwap50: boolean;
+	delta50Reclaimed: boolean;
+	gamma50Positive: boolean;
+	macdBullish: boolean;
+	trendDeltaPositive: boolean;
+	mtfTrendBullish: boolean;
+	macroFilterOk: boolean;
+	atrTrendOk: boolean;
+	atrTrendReason: string;
+	positionFlat: boolean;
+}
+
+interface TrendShortChecks {
+	priceBelowAllVwaps: boolean;
+	delta200Negative: boolean;
+	gamma200Negative: boolean;
+	pullbackToVwap50: boolean;
+	delta50Rejected: boolean;
+	gamma50Negative: boolean;
+	macdBearish: boolean;
+	trendDeltaNegative: boolean;
+	mtfTrendBearish: boolean;
+	macroFilterOk: boolean;
+	atrTrendOk: boolean;
+	atrTrendReason: string;
+	positionFlat: boolean;
+}
+
+interface MeanRevLongChecks {
+	priceBelowDailyExtreme: boolean;
+	deltaDailyExtremeNegative: boolean;
+	gammaDailyPositiveFlip: boolean;
+	macdBullish: boolean;
+	atrReferenceAvailable: boolean;
+}
+
+interface MeanRevShortChecks {
+	priceAboveDailyExtreme: boolean;
+	deltaDailyExtremePositive: boolean;
+	gammaDailyNegativeFlip: boolean;
+	macdBearish: boolean;
+	atrReferenceAvailable: boolean;
+}
+
+interface BreakoutLongChecks {
+	betweenDailyWeekly: boolean;
+	atrCompression: boolean;
+	deltaCalm: boolean;
+	gammaCalm: boolean;
+	prevBelowDaily: boolean;
+	reclaimDailyClose: boolean;
+	deltaPositive: boolean;
+	gammaPositive: boolean;
+	atrExpansion: boolean;
+}
+
+interface BreakoutShortChecks {
+	betweenDailyWeekly: boolean;
+	atrCompression: boolean;
+	deltaCalm: boolean;
+	gammaCalm: boolean;
+	prevAboveDaily: boolean;
+	rejectDailyClose: boolean;
+	deltaNegative: boolean;
+	gammaNegative: boolean;
+	atrExpansion: boolean;
+}
+
+interface StrategySetupChecks {
+	trendLong: TrendLongChecks;
+	trendShort: TrendShortChecks;
+	meanRevLong: MeanRevLongChecks;
+	meanRevShort: MeanRevShortChecks;
+	breakoutLong: BreakoutLongChecks;
+	breakoutShort: BreakoutShortChecks;
+}
+
+interface StrategyEvaluation {
+	flags: StrategyFlags;
+	setupChecks: StrategySetupChecks;
+}
+
+interface SetupEvaluation<TChecks> {
+	active: boolean;
+	checks: TChecks;
+}
+
+interface AtrTrendRules {
+	requireExpansionForTrend: boolean;
+	minAtr1m: number;
+	minAtr5m: number;
+}
+
 const DEFAULT_MACD_FAST = 12;
 const DEFAULT_MACD_SLOW = 26;
 const DEFAULT_MACD_SIGNAL = 9;
 const DEFAULT_MACD_WINDOW = 20;
+const DEFAULT_ATR_GATING: AtrTrendRules = {
+	requireExpansionForTrend: false,
+	minAtr1m: 0,
+	minAtr5m: 0,
+};
 
 export class VWAPDeltaGammaStrategy {
 	constructor(
@@ -149,14 +256,15 @@ export class VWAPDeltaGammaStrategy {
 			executionCandles,
 			vwapContext.daily.value
 		);
-		const trendFlags = this.evaluateSetups(
+		const evaluation = this.evaluateSetups(
 			latest,
 			prev,
 			vwapContext,
 			atrContext,
 			mtfBias,
 			macdForecast,
-			deltaHistory
+			deltaHistory,
+			position
 		);
 		const recommendations = this.computeRecommendations(
 			latest,
@@ -169,47 +277,48 @@ export class VWAPDeltaGammaStrategy {
 			atrContext,
 			mtfBias,
 			macdForecast,
-			flags: trendFlags,
+			flags: evaluation.flags,
+			setupChecks: evaluation.setupChecks,
 		});
 
-		if (position === "LONG" && trendFlags.longExitReason) {
+		if (position === "LONG" && evaluation.flags.longExitReason) {
 			return this.tradeIntent(
 				latest,
 				"CLOSE_LONG",
-				trendFlags.longExitReason,
+				evaluation.flags.longExitReason,
 				recommendations
 			);
 		}
-		if (position === "SHORT" && trendFlags.shortExitReason) {
+		if (position === "SHORT" && evaluation.flags.shortExitReason) {
 			return this.tradeIntent(
 				latest,
 				"CLOSE_SHORT",
-				trendFlags.shortExitReason,
+				evaluation.flags.shortExitReason,
 				recommendations
 			);
 		}
 		if (position === "FLAT") {
 			if (
-				trendFlags.trendLong ||
-				trendFlags.meanRevLong ||
-				trendFlags.breakoutLong
+				evaluation.flags.trendLong ||
+				evaluation.flags.meanRevLong ||
+				evaluation.flags.breakoutLong
 			) {
-				const reason = trendFlags.trendLong
+				const reason = evaluation.flags.trendLong
 					? "trend_continuation_long"
-					: trendFlags.breakoutLong
+					: evaluation.flags.breakoutLong
 					? "compression_breakout_long"
 					: "mean_reversion_long";
 				return this.tradeIntent(latest, "OPEN_LONG", reason, recommendations);
 			}
 
 			if (
-				trendFlags.trendShort ||
-				trendFlags.meanRevShort ||
-				trendFlags.breakoutShort
+				evaluation.flags.trendShort ||
+				evaluation.flags.meanRevShort ||
+				evaluation.flags.breakoutShort
 			) {
-				const reason = trendFlags.trendShort
+				const reason = evaluation.flags.trendShort
 					? "trend_continuation_short"
-					: trendFlags.breakoutShort
+					: evaluation.flags.breakoutShort
 					? "compression_breakout_short"
 					: "mean_reversion_short";
 				return this.tradeIntent(latest, "OPEN_SHORT", reason, recommendations);
@@ -504,8 +613,9 @@ export class VWAPDeltaGammaStrategy {
 		atr: AtrContext,
 		bias: BiasSummary,
 		macdForecast: number | null,
-		deltaHistory: Array<number | null>
-	): StrategyFlags {
+		deltaHistory: Array<number | null>,
+		position: PositionSide
+	): StrategyEvaluation {
 		const price = latest.close;
 		const prevClose = prev?.close ?? null;
 		const priceAboveAll =
@@ -519,15 +629,26 @@ export class VWAPDeltaGammaStrategy {
 			this.isBelow(price, vwap.weekly.value) &&
 			this.isBelow(price, vwap.monthly.value);
 
+		const atr1mValue = atr.atr1m ?? 0;
+		const pullbackBand =
+			atr1mValue > 0
+				? this.config.minPullbackDistance * atr1mValue
+				: this.config.minPullbackDistance;
 		const pullbackTouch =
 			vwap.rolling50.value !== null &&
-			Math.abs(price - vwap.rolling50.value) <= this.config.minPullbackDistance;
+			Math.abs(price - vwap.rolling50.value) <= pullbackBand;
 		const delta50FlippedPositive =
 			vwap.rolling50.delta.deltaSign === "positive" &&
 			vwap.rolling50.delta.gammaFlipped;
 		const gamma50Positive = vwap.rolling50.delta.gammaSign === "positive";
+		const gamma50Negative = vwap.rolling50.delta.gammaSign === "negative";
+		const delta50Rejected =
+			vwap.rolling50.delta.deltaSign === "negative" &&
+			vwap.rolling50.delta.gammaFlipped;
 		const delta200Positive = vwap.rolling200.delta.deltaSign === "positive";
 		const gamma200Positive = vwap.rolling200.delta.gammaSign === "positive";
+		const delta200Negative = vwap.rolling200.delta.deltaSign === "negative";
+		const gamma200Negative = vwap.rolling200.delta.gammaSign === "negative";
 		const macdUpward =
 			macdForecast !== null && macdForecast > this.config.macdForecastDeadband;
 		const macdDownward =
@@ -536,32 +657,36 @@ export class VWAPDeltaGammaStrategy {
 			vwap.trendRolling50?.delta?.deltaSign === "positive";
 		const fiveMinuteDeltaNegative =
 			vwap.trendRolling50?.delta?.deltaSign === "negative";
-
-		const trendLong =
-			priceAboveAll &&
-			delta200Positive &&
-			gamma200Positive &&
-			pullbackTouch &&
-			delta50FlippedPositive &&
-			gamma50Positive &&
-			macdUpward &&
-			!!fiveMinuteDeltaPositive &&
-			atr.rising &&
-			bias.trend === "bull" &&
-			bias.macro !== "bear";
-		const trendShort =
-			priceBelowAll &&
-			vwap.rolling200.delta.deltaSign === "negative" &&
-			vwap.rolling200.delta.gammaSign === "negative" &&
-			pullbackTouch &&
-			vwap.rolling50.delta.deltaSign === "negative" &&
-			vwap.rolling50.delta.gammaFlipped &&
-			vwap.rolling50.delta.gammaSign === "negative" &&
-			macdDownward &&
-			!!fiveMinuteDeltaNegative &&
-			atr.rising &&
-			bias.trend === "bear" &&
-			bias.macro !== "bull";
+		const atrTrendRules = this.normalizeAtrTrendRules();
+		const atrTrendResult = this.evaluateAtrTrend(atr, atrTrendRules);
+		const trendLongEvaluation = this.evaluateTrendLong({
+			priceAboveAll,
+			delta200Positive,
+			gamma200Positive,
+			pullbackTouch,
+			delta50Reclaimed: delta50FlippedPositive,
+			gamma50Positive,
+			macdUpward,
+			trendDeltaPositive: !!fiveMinuteDeltaPositive,
+			bias,
+			atrTrendOk: atrTrendResult.ok,
+			atrTrendReason: atrTrendResult.reason ?? "ok",
+			position,
+		});
+		const trendShortEvaluation = this.evaluateTrendShort({
+			priceBelowAll,
+			delta200Negative,
+			gamma200Negative,
+			pullbackTouch,
+			delta50Rejected,
+			gamma50Negative,
+			macdDownward,
+			trendDeltaNegative: !!fiveMinuteDeltaNegative,
+			bias,
+			atrTrendOk: atrTrendResult.ok,
+			atrTrendReason: atrTrendResult.reason ?? "ok",
+			position,
+		});
 
 		const atrReference = atr.atr1m ?? 0;
 		const priceBelowDailyExtreme =
@@ -589,16 +714,20 @@ export class VWAPDeltaGammaStrategy {
 			vwap.daily.delta.gammaSign === "negative" &&
 			vwap.daily.delta.gammaFlipped;
 
-		const meanRevLong =
-			priceBelowDailyExtreme &&
-			deltaDailyExtremeNegative &&
-			gammaDailyPositiveFlip &&
-			macdUpward;
-		const meanRevShort =
-			priceAboveDailyExtreme &&
-			deltaDailyExtremePositive &&
-			gammaDailyNegativeFlip &&
-			macdDownward;
+		const meanRevLongEvaluation = this.evaluateMeanRevLong({
+			priceBelowDailyExtreme,
+			deltaDailyExtremeNegative,
+			gammaDailyPositiveFlip,
+			macdUpward,
+			atrReferenceAvailable: atrReference > 0,
+		});
+		const meanRevShortEvaluation = this.evaluateMeanRevShort({
+			priceAboveDailyExtreme,
+			deltaDailyExtremePositive,
+			gammaDailyNegativeFlip,
+			macdDownward,
+			atrReferenceAvailable: atrReference > 0,
+		});
 
 		const betweenDailyWeekly = this.isBetween(
 			price,
@@ -619,26 +748,24 @@ export class VWAPDeltaGammaStrategy {
 		const gammaNearZero =
 			vwap.daily.delta.gammaMagnitude !== null &&
 			vwap.daily.delta.gammaMagnitude <= this.config.minPullbackDistance;
-		const breakoutLong =
-			betweenDailyWeekly &&
-			atr.low &&
-			deltaSmall &&
-			gammaNearZero &&
-			prevBelowDaily &&
-			this.isAbove(price, vwap.daily.value) &&
-			vwap.daily.delta.deltaSign === "positive" &&
-			vwap.daily.delta.gammaSign === "positive" &&
-			atr.expanding;
-		const breakoutShort =
-			betweenDailyWeekly &&
-			atr.low &&
-			deltaSmall &&
-			gammaNearZero &&
-			prevAboveDaily &&
-			this.isBelow(price, vwap.daily.value) &&
-			vwap.daily.delta.deltaSign === "negative" &&
-			vwap.daily.delta.gammaSign === "negative" &&
-			atr.expanding;
+		const breakoutLongEvaluation = this.evaluateBreakoutLong({
+			betweenDailyWeekly,
+			atr,
+			deltaSmall,
+			gammaNearZero,
+			prevBelowDaily,
+			price,
+			vwap,
+		});
+		const breakoutShortEvaluation = this.evaluateBreakoutShort({
+			betweenDailyWeekly,
+			atr,
+			deltaSmall,
+			gammaNearZero,
+			prevAboveDaily,
+			price,
+			vwap,
+		});
 
 		const deltaWeakening = this.isDeltaWeakening(deltaHistory, "long");
 		const deltaStrengthening = this.isDeltaWeakening(deltaHistory, "short");
@@ -665,18 +792,271 @@ export class VWAPDeltaGammaStrategy {
 			? "compression"
 			: "balanced";
 
-		return {
-			trendLong,
-			trendShort,
-			meanRevLong,
-			meanRevShort,
-			breakoutLong,
-			breakoutShort,
+		const flags: StrategyFlags = {
+			trendLong: trendLongEvaluation.active,
+			trendShort: trendShortEvaluation.active,
+			meanRevLong: meanRevLongEvaluation.active,
+			meanRevShort: meanRevShortEvaluation.active,
+			breakoutLong: breakoutLongEvaluation.active,
+			breakoutShort: breakoutShortEvaluation.active,
 			longExitReason,
 			shortExitReason,
 			trendRegime,
 			volatilityRegime,
 		};
+
+		const setupChecks: StrategySetupChecks = {
+			trendLong: trendLongEvaluation.checks,
+			trendShort: trendShortEvaluation.checks,
+			meanRevLong: meanRevLongEvaluation.checks,
+			meanRevShort: meanRevShortEvaluation.checks,
+			breakoutLong: breakoutLongEvaluation.checks,
+			breakoutShort: breakoutShortEvaluation.checks,
+		};
+
+		return { flags, setupChecks };
+	}
+
+	private evaluateTrendLong(params: {
+		priceAboveAll: boolean;
+		delta200Positive: boolean;
+		gamma200Positive: boolean;
+		pullbackTouch: boolean;
+		delta50Reclaimed: boolean;
+		gamma50Positive: boolean;
+		macdUpward: boolean;
+		trendDeltaPositive: boolean;
+		bias: BiasSummary;
+		atrTrendOk: boolean;
+		atrTrendReason: string;
+		position: PositionSide;
+	}): SetupEvaluation<TrendLongChecks> {
+		const checks: TrendLongChecks = {
+			priceAboveAllVwaps: params.priceAboveAll,
+			delta200Positive: params.delta200Positive,
+			gamma200Positive: params.gamma200Positive,
+			pullbackToVwap50: params.pullbackTouch,
+			delta50Reclaimed: params.delta50Reclaimed,
+			gamma50Positive: params.gamma50Positive,
+			macdBullish: params.macdUpward,
+			trendDeltaPositive: params.trendDeltaPositive,
+			mtfTrendBullish: params.bias.trend === "bull",
+			macroFilterOk: params.bias.macro !== "bear",
+			atrTrendOk: params.atrTrendOk,
+			atrTrendReason: params.atrTrendReason,
+			positionFlat: params.position === "FLAT",
+		};
+		const active =
+			checks.priceAboveAllVwaps &&
+			checks.delta200Positive &&
+			checks.gamma200Positive &&
+			checks.pullbackToVwap50 &&
+			checks.delta50Reclaimed &&
+			checks.gamma50Positive &&
+			checks.macdBullish &&
+			checks.trendDeltaPositive &&
+			checks.mtfTrendBullish &&
+			checks.macroFilterOk &&
+			checks.atrTrendOk;
+		return { active, checks };
+	}
+
+	private evaluateTrendShort(params: {
+		priceBelowAll: boolean;
+		delta200Negative: boolean;
+		gamma200Negative: boolean;
+		pullbackTouch: boolean;
+		delta50Rejected: boolean;
+		gamma50Negative: boolean;
+		macdDownward: boolean;
+		trendDeltaNegative: boolean;
+		bias: BiasSummary;
+		atrTrendOk: boolean;
+		atrTrendReason: string;
+		position: PositionSide;
+	}): SetupEvaluation<TrendShortChecks> {
+		const checks: TrendShortChecks = {
+			priceBelowAllVwaps: params.priceBelowAll,
+			delta200Negative: params.delta200Negative,
+			gamma200Negative: params.gamma200Negative,
+			pullbackToVwap50: params.pullbackTouch,
+			delta50Rejected: params.delta50Rejected,
+			gamma50Negative: params.gamma50Negative,
+			macdBearish: params.macdDownward,
+			trendDeltaNegative: params.trendDeltaNegative,
+			mtfTrendBearish: params.bias.trend === "bear",
+			macroFilterOk: params.bias.macro !== "bull",
+			atrTrendOk: params.atrTrendOk,
+			atrTrendReason: params.atrTrendReason,
+			positionFlat: params.position === "FLAT",
+		};
+		const active =
+			checks.priceBelowAllVwaps &&
+			checks.delta200Negative &&
+			checks.gamma200Negative &&
+			checks.pullbackToVwap50 &&
+			checks.delta50Rejected &&
+			checks.gamma50Negative &&
+			checks.macdBearish &&
+			checks.trendDeltaNegative &&
+			checks.mtfTrendBearish &&
+			checks.macroFilterOk &&
+			checks.atrTrendOk;
+		return { active, checks };
+	}
+
+	private evaluateMeanRevLong(params: {
+		priceBelowDailyExtreme: boolean;
+		deltaDailyExtremeNegative: boolean;
+		gammaDailyPositiveFlip: boolean;
+		macdUpward: boolean;
+		atrReferenceAvailable: boolean;
+	}): SetupEvaluation<MeanRevLongChecks> {
+		const checks: MeanRevLongChecks = {
+			priceBelowDailyExtreme: params.priceBelowDailyExtreme,
+			deltaDailyExtremeNegative: params.deltaDailyExtremeNegative,
+			gammaDailyPositiveFlip: params.gammaDailyPositiveFlip,
+			macdBullish: params.macdUpward,
+			atrReferenceAvailable: params.atrReferenceAvailable,
+		};
+		const active =
+			checks.priceBelowDailyExtreme &&
+			checks.deltaDailyExtremeNegative &&
+			checks.gammaDailyPositiveFlip &&
+			checks.macdBullish &&
+			checks.atrReferenceAvailable;
+		return { active, checks };
+	}
+
+	private evaluateMeanRevShort(params: {
+		priceAboveDailyExtreme: boolean;
+		deltaDailyExtremePositive: boolean;
+		gammaDailyNegativeFlip: boolean;
+		macdDownward: boolean;
+		atrReferenceAvailable: boolean;
+	}): SetupEvaluation<MeanRevShortChecks> {
+		const checks: MeanRevShortChecks = {
+			priceAboveDailyExtreme: params.priceAboveDailyExtreme,
+			deltaDailyExtremePositive: params.deltaDailyExtremePositive,
+			gammaDailyNegativeFlip: params.gammaDailyNegativeFlip,
+			macdBearish: params.macdDownward,
+			atrReferenceAvailable: params.atrReferenceAvailable,
+		};
+		const active =
+			checks.priceAboveDailyExtreme &&
+			checks.deltaDailyExtremePositive &&
+			checks.gammaDailyNegativeFlip &&
+			checks.macdBearish &&
+			checks.atrReferenceAvailable;
+		return { active, checks };
+	}
+
+	private evaluateBreakoutLong(params: {
+		betweenDailyWeekly: boolean;
+		atr: AtrContext;
+		deltaSmall: boolean;
+		gammaNearZero: boolean;
+		prevBelowDaily: boolean;
+		price: number;
+		vwap: VwapContext;
+	}): SetupEvaluation<BreakoutLongChecks> {
+		const reclaimDaily = this.isAbove(params.price, params.vwap.daily.value);
+		const checks: BreakoutLongChecks = {
+			betweenDailyWeekly: params.betweenDailyWeekly,
+			atrCompression: params.atr.low,
+			deltaCalm: params.deltaSmall,
+			gammaCalm: params.gammaNearZero,
+			prevBelowDaily: params.prevBelowDaily,
+			reclaimDailyClose: reclaimDaily,
+			deltaPositive: params.vwap.daily.delta.deltaSign === "positive",
+			gammaPositive: params.vwap.daily.delta.gammaSign === "positive",
+			atrExpansion: params.atr.expanding,
+		};
+		const active =
+			checks.betweenDailyWeekly &&
+			checks.atrCompression &&
+			checks.deltaCalm &&
+			checks.gammaCalm &&
+			checks.prevBelowDaily &&
+			checks.reclaimDailyClose &&
+			checks.deltaPositive &&
+			checks.gammaPositive &&
+			checks.atrExpansion;
+		return { active, checks };
+	}
+
+	private evaluateBreakoutShort(params: {
+		betweenDailyWeekly: boolean;
+		atr: AtrContext;
+		deltaSmall: boolean;
+		gammaNearZero: boolean;
+		prevAboveDaily: boolean;
+		price: number;
+		vwap: VwapContext;
+	}): SetupEvaluation<BreakoutShortChecks> {
+		const rejectDaily = this.isBelow(params.price, params.vwap.daily.value);
+		const checks: BreakoutShortChecks = {
+			betweenDailyWeekly: params.betweenDailyWeekly,
+			atrCompression: params.atr.low,
+			deltaCalm: params.deltaSmall,
+			gammaCalm: params.gammaNearZero,
+			prevAboveDaily: params.prevAboveDaily,
+			rejectDailyClose: rejectDaily,
+			deltaNegative: params.vwap.daily.delta.deltaSign === "negative",
+			gammaNegative: params.vwap.daily.delta.gammaSign === "negative",
+			atrExpansion: params.atr.expanding,
+		};
+		const active =
+			checks.betweenDailyWeekly &&
+			checks.atrCompression &&
+			checks.deltaCalm &&
+			checks.gammaCalm &&
+			checks.prevAboveDaily &&
+			checks.rejectDailyClose &&
+			checks.deltaNegative &&
+			checks.gammaNegative &&
+			checks.atrExpansion;
+		return { active, checks };
+	}
+
+	private normalizeAtrTrendRules(): AtrTrendRules {
+		const overrides = this.config.atr ?? {};
+		return {
+			requireExpansionForTrend:
+				overrides.requireExpansionForTrend ??
+				DEFAULT_ATR_GATING.requireExpansionForTrend,
+			minAtr1m: overrides.minAtr1m ?? DEFAULT_ATR_GATING.minAtr1m,
+			minAtr5m: overrides.minAtr5m ?? DEFAULT_ATR_GATING.minAtr5m,
+		};
+	}
+
+	private evaluateAtrTrend(
+		atr: AtrContext,
+		rules: AtrTrendRules
+	): { ok: boolean; reason: string | null } {
+		const atr1m = atr.atr1m ?? 0;
+		const atr5m = atr.atr5m ?? 0;
+
+		// 1) enforce explicit minimum ATR thresholds, if configured
+		if (rules.minAtr1m > 0 && atr1m < rules.minAtr1m) {
+			return { ok: false, reason: "atr1m_below_min" };
+		}
+		if (rules.minAtr5m > 0 && atr5m < rules.minAtr5m) {
+			return { ok: false, reason: "atr5m_below_min" };
+		}
+
+		// 2) if requireExpansionForTrend is true, require non-low & expanding
+		if (rules.requireExpansionForTrend) {
+			if (atr.low) {
+				return { ok: false, reason: "atr_low" };
+			}
+			if (!atr.expanding) {
+				return { ok: false, reason: "atr_not_expanding" };
+			}
+		}
+
+		// 3) otherwise, ATR should NOT block trend trades at all
+		return { ok: true, reason: null };
 	}
 
 	private computeDeltaHistory(
@@ -894,6 +1274,7 @@ export class VWAPDeltaGammaStrategy {
 			mtfBias: BiasSummary;
 			macdForecast: number | null;
 			flags: StrategyFlags;
+			setupChecks: StrategySetupChecks;
 		}
 	): void {
 		strategyLogger.info("strategy_context", {
@@ -928,6 +1309,7 @@ export class VWAPDeltaGammaStrategy {
 				volatility: payload.flags.volatilityRegime,
 			},
 			macdForecast: payload.macdForecast,
+			setupChecks: payload.setupChecks,
 			setups: {
 				trendLong: payload.flags.trendLong,
 				trendShort: payload.flags.trendShort,

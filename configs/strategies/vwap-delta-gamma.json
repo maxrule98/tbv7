@@ -15,5 +15,10 @@
 	"deltaExtremeMultiplier": 2,
 	"minPullbackDistance": 0.1,
 	"macdForecastDeadband": 0,
-	"cacheTTLms": 45000
+	"cacheTTLms": 45000,
+	"atr": {
+		"requireExpansionForTrend": false,
+		"minAtr1m": 0,
+		"minAtr5m": 0
+	}
 }
