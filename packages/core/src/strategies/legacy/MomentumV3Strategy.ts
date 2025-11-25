@@ -1,4 +1,4 @@
-import { Candle, PositionSide, TradeIntent } from "@agenai/core";
+import { Candle, PositionSide, TradeIntent } from "../../types";
 import {
 	AtrInput,
 	calculateATRSeries,
@@ -7,6 +7,7 @@ import {
 	macd,
 	sma,
 } from "@agenai/indicators";
+import { createLogger } from "../../utils/logger";
 import {
 	HigherTimeframeTrend,
 	HigherTimeframeTrendFetcher,
@@ -34,6 +35,8 @@ export interface MomentumV3StrategyDependencies {
 }
 
 export class MomentumV3Strategy {
+	private readonly logger = createLogger("strategy:momentum_v3");
+
 	constructor(
 		private readonly config: MomentumV3Config,
 		private readonly deps: MomentumV3StrategyDependencies
@@ -295,15 +298,12 @@ export class MomentumV3Strategy {
 			confluenceChecks: Record<string, unknown>;
 		}
 	): void {
-		console.log(
-			JSON.stringify({
-				event: "strategy_context",
-				symbol: latest.symbol,
-				timeframe: latest.timeframe,
-				timestamp: new Date(latest.timestamp).toISOString(),
-				...payload,
-			})
-		);
+		this.logger.info("strategy_context", {
+			symbol: latest.symbol,
+			timeframe: latest.timeframe,
+			timestamp: new Date(latest.timestamp).toISOString(),
+			...payload,
+		});
 	}
 
 	private noAction(candles: Candle[], reason: string): TradeIntent {

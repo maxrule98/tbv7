@@ -3,6 +3,7 @@ import path from "node:path";
 import dotenv from "dotenv";
 
 import type { StrategyId } from "./strategies/ids";
+import type { VWAPDeltaGammaConfig } from "./strategies/vwap-delta-gamma/VWAPDeltaGammaStrategy";
 export type { StrategyId } from "./strategies/ids";
 
 let envLoaded = false;
@@ -20,85 +21,10 @@ interface ExchangeConfigFile {
 	defaultSymbol: string;
 }
 
-interface StrategyIndicatorConfigFile {
-	emaFast?: number;
-	emaSlow?: number;
-	signal?: number;
-	pullbackFast?: number;
-	pullbackSlow?: number;
-	atrPeriod?: number;
-	rsiPeriod?: number;
-	arWindow?: number;
-}
-
-interface StrategyThresholdConfigFile {
-	minForecast?: number;
-	minAtr?: number;
-	maxAtr?: number;
-	rsiLongLower?: number;
-	rsiLongUpper?: number;
-	rsiShortLower?: number;
-	rsiShortUpper?: number;
-	htfHistogramDeadband?: number;
-}
-
-interface MomentumV3HtfConfigFile {
-	timeframe?: string;
-	macdFast?: number;
-	macdSlow?: number;
-	macdSignal?: number;
-	deadband?: number;
-}
-
-interface MomentumV3AtrConfigFile {
-	period?: number;
-	emaPeriod?: number;
-}
-
-interface MomentumV3VolumeConfigFile {
-	smaPeriod?: number;
-	spikeMultiplier?: number;
-}
-
-interface MomentumV3BreakoutConfigFile {
-	lookback?: number;
-}
-
-interface MomentumV3RsiConfigFile {
-	period?: number;
-	longMin?: number;
-	longMax?: number;
-	shortMin?: number;
-	shortMax?: number;
-}
-
-interface BaseStrategyConfigFile {
+type VwapStrategyConfigFile = VWAPDeltaGammaConfig & {
 	id?: StrategyId;
-	symbol: string;
-	timeframe: string;
-	mode?: string;
-	htfCacheMs?: number;
-}
-
-interface MacdAr4StrategyConfigFile extends BaseStrategyConfigFile {
-	id?: "macd_ar4_v2";
-	higherTimeframe?: string;
-	indicators?: StrategyIndicatorConfigFile;
-	thresholds?: StrategyThresholdConfigFile;
-}
-
-interface MomentumV3StrategyConfigFile extends BaseStrategyConfigFile {
-	id: "momentum_v3";
-	htf?: MomentumV3HtfConfigFile;
-	atr?: MomentumV3AtrConfigFile;
-	volume?: MomentumV3VolumeConfigFile;
-	breakout?: MomentumV3BreakoutConfigFile;
-	rsi?: MomentumV3RsiConfigFile;
-}
-
-type StrategyConfigFile =
-	| MacdAr4StrategyConfigFile
-	| MomentumV3StrategyConfigFile;
+	symbol?: string;
+};
 
 interface RiskConfigFile {
 	maxLeverage: number;
@@ -139,84 +65,10 @@ export interface ExchangeConfig extends ExchangeConfigFile {
 	};
 }
 
-interface BaseStrategyConfig {
-	id: StrategyId;
-	symbol: string;
-	timeframe: string;
-	mode: string;
+export interface StrategyConfig extends VWAPDeltaGammaConfig {
+	id: "vwap_delta_gamma";
+	symbol?: string;
 }
-
-export interface StrategyIndicatorConfig {
-	emaFast: number;
-	emaSlow: number;
-	signal: number;
-	pullbackFast: number;
-	pullbackSlow: number;
-	atrPeriod: number;
-	rsiPeriod: number;
-	arWindow: number;
-}
-
-export interface StrategyThresholdConfig {
-	minForecast: number;
-	minAtr: number;
-	maxAtr: number;
-	rsiLongLower: number;
-	rsiLongUpper: number;
-	rsiShortLower: number;
-	rsiShortUpper: number;
-	htfHistogramDeadband: number;
-}
-
-export interface MacdAr4StrategyConfig extends BaseStrategyConfig {
-	id: "macd_ar4_v2";
-	higherTimeframe: string;
-	htfCacheMs: number;
-	indicators: StrategyIndicatorConfig;
-	thresholds: StrategyThresholdConfig;
-}
-
-export interface MomentumV3HtfConfig {
-	timeframe: string;
-	macdFast: number;
-	macdSlow: number;
-	macdSignal: number;
-	deadband: number;
-}
-
-export interface MomentumV3AtrConfig {
-	period: number;
-	emaPeriod: number;
-}
-
-export interface MomentumV3VolumeConfig {
-	smaPeriod: number;
-	spikeMultiplier: number;
-}
-
-export interface MomentumV3BreakoutConfig {
-	lookback: number;
-}
-
-export interface MomentumV3RsiConfig {
-	period: number;
-	longMin: number;
-	longMax: number;
-	shortMin: number;
-	shortMax: number;
-}
-
-export interface MomentumV3StrategyConfig extends BaseStrategyConfig {
-	id: "momentum_v3";
-	htfCacheMs: number;
-	htf: MomentumV3HtfConfig;
-	atr: MomentumV3AtrConfig;
-	volume: MomentumV3VolumeConfig;
-	breakout: MomentumV3BreakoutConfig;
-	rsi: MomentumV3RsiConfig;
-}
-
-export type StrategyConfig = MacdAr4StrategyConfig | MomentumV3StrategyConfig;
 export interface RiskConfig {
 	maxLeverage: number;
 	riskPerTradePercent: number;
@@ -240,6 +92,7 @@ export interface AgenaiConfig {
 export interface ConfigLoadOptions {
 	envPath?: string;
 	configDir?: string;
+	strategyDir?: string;
 	exchangeProfile?: string;
 	strategyProfile?: string;
 	riskProfile?: string;
@@ -272,6 +125,14 @@ export const getWorkspaceRoot = (): string => findWorkspaceRoot();
 const getDefaultEnvPath = (): string => path.join(findWorkspaceRoot(), ".env");
 const getDefaultConfigDir = (): string =>
 	path.join(findWorkspaceRoot(), "config");
+const getDefaultStrategyDir = (): string => {
+	const workspaceRoot = findWorkspaceRoot();
+	const modernDir = path.join(workspaceRoot, "configs");
+	if (fs.existsSync(path.join(modernDir, "strategies"))) {
+		return modernDir;
+	}
+	return path.join(workspaceRoot, "config");
+};
 
 const getEnvVar = (key: string, fallback?: string): string => {
 	const value = process.env[key];
@@ -344,99 +205,36 @@ export const loadExchangeConfig = (
 	};
 };
 
-export const loadStrategyConfig = (
-	configDir = getDefaultConfigDir(),
-	strategyProfile = "macd_ar4"
-): StrategyConfig => {
-	const strategyPath = path.join(
-		configDir,
-		"strategies",
-		`${strategyProfile}.json`
+const resolveStrategyConfigPath = (
+	strategyDir: string,
+	strategyProfile: string
+): string => {
+	const profileName = strategyProfile.endsWith(".json")
+		? strategyProfile
+		: `${strategyProfile}.json`;
+	const candidates = [
+		path.join(strategyDir, "strategies", profileName),
+		path.join(strategyDir, profileName),
+	];
+	for (const candidate of candidates) {
+		if (fs.existsSync(candidate)) {
+			return candidate;
+		}
+	}
+	throw new Error(
+		`Strategy config not found. Looked for ${candidates.join(", ")}`
 	);
-	const file = readJsonFile<StrategyConfigFile>(strategyPath);
-	const strategyId: StrategyId =
-		file.id === "momentum_v3" ? "momentum_v3" : "macd_ar4_v2";
-	return strategyId === "momentum_v3"
-		? normalizeMomentumV3Config(file as MomentumV3StrategyConfigFile)
-		: normalizeMacdAr4Config(file as MacdAr4StrategyConfigFile);
 };
 
-const normalizeMacdAr4Config = (
-	file: MacdAr4StrategyConfigFile
-): MacdAr4StrategyConfig => {
-	const indicatorFile = file.indicators ?? {};
-	const thresholdFile = file.thresholds ?? {};
-	const indicators: StrategyIndicatorConfig = {
-		emaFast: indicatorFile.emaFast ?? 12,
-		emaSlow: indicatorFile.emaSlow ?? 26,
-		signal: indicatorFile.signal ?? 9,
-		pullbackFast: indicatorFile.pullbackFast ?? 9,
-		pullbackSlow: indicatorFile.pullbackSlow ?? 21,
-		atrPeriod: indicatorFile.atrPeriod ?? 14,
-		rsiPeriod: indicatorFile.rsiPeriod ?? 14,
-		arWindow: indicatorFile.arWindow ?? 20,
-	};
-	const thresholds: StrategyThresholdConfig = {
-		minForecast: thresholdFile.minForecast ?? 0,
-		minAtr: thresholdFile.minAtr ?? 8,
-		maxAtr: thresholdFile.maxAtr ?? 80,
-		rsiLongLower: thresholdFile.rsiLongLower ?? 40,
-		rsiLongUpper: thresholdFile.rsiLongUpper ?? 70,
-		rsiShortLower: thresholdFile.rsiShortLower ?? 30,
-		rsiShortUpper: thresholdFile.rsiShortUpper ?? 60,
-		htfHistogramDeadband: thresholdFile.htfHistogramDeadband ?? 0.0005,
-	};
+export const loadStrategyConfig = (
+	strategyDir = getDefaultStrategyDir(),
+	strategyProfile = "vwap-delta-gamma"
+): StrategyConfig => {
+	const strategyPath = resolveStrategyConfigPath(strategyDir, strategyProfile);
+	const file = readJsonFile<VwapStrategyConfigFile>(strategyPath);
 	return {
-		id: "macd_ar4_v2",
-		symbol: file.symbol,
-		timeframe: file.timeframe,
-		mode: file.mode ?? "long-only",
-		higherTimeframe: file.higherTimeframe ?? "15m",
-		htfCacheMs: file.htfCacheMs ?? 60_000,
-		indicators,
-		thresholds,
-	};
-};
-
-const normalizeMomentumV3Config = (
-	file: MomentumV3StrategyConfigFile
-): MomentumV3StrategyConfig => {
-	const htfFile = file.htf ?? {};
-	const atrFile = file.atr ?? {};
-	const volumeFile = file.volume ?? {};
-	const breakoutFile = file.breakout ?? {};
-	const rsiFile = file.rsi ?? {};
-	return {
-		id: "momentum_v3",
-		symbol: file.symbol,
-		timeframe: file.timeframe,
-		mode: file.mode ?? "long-only",
-		htfCacheMs: file.htfCacheMs ?? 60_000,
-		htf: {
-			timeframe: htfFile.timeframe ?? "15m",
-			macdFast: htfFile.macdFast ?? 12,
-			macdSlow: htfFile.macdSlow ?? 26,
-			macdSignal: htfFile.macdSignal ?? 9,
-			deadband: htfFile.deadband ?? 0,
-		},
-		atr: {
-			period: atrFile.period ?? 14,
-			emaPeriod: atrFile.emaPeriod ?? 20,
-		},
-		volume: {
-			smaPeriod: volumeFile.smaPeriod ?? 20,
-			spikeMultiplier: volumeFile.spikeMultiplier ?? 1.2,
-		},
-		breakout: {
-			lookback: breakoutFile.lookback ?? 20,
-		},
-		rsi: {
-			period: rsiFile.period ?? 14,
-			longMin: rsiFile.longMin ?? 45,
-			longMax: rsiFile.longMax ?? 70,
-			shortMin: rsiFile.shortMin ?? 20,
-			shortMax: rsiFile.shortMax ?? 55,
-		},
+		...file,
+		id: "vwap_delta_gamma",
 	};
 };
 
@@ -476,11 +274,14 @@ export const loadAgenaiConfig = (
 	const workspaceRoot = findWorkspaceRoot();
 	const envPath = options.envPath ?? path.join(workspaceRoot, ".env");
 	const configDir = options.configDir ?? path.join(workspaceRoot, "config");
+	const strategyDir =
+		options.strategyDir ??
+		(options.configDir ? options.configDir : getDefaultStrategyDir());
 	const env = loadEnvConfig(envPath);
 	return {
 		env,
 		exchange: loadExchangeConfig(env, configDir, options.exchangeProfile),
-		strategy: loadStrategyConfig(configDir, options.strategyProfile),
+		strategy: loadStrategyConfig(strategyDir, options.strategyProfile),
 		risk: loadRiskConfig(configDir, options.riskProfile),
 	};
 };

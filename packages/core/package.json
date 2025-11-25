@@ -12,8 +12,7 @@
 	"dependencies": {
 		"dotenv": "^16.4.5",
 		"@agenai/indicators": "workspace:*",
-		"@agenai/models-quant": "workspace:*",
-		"@agenai/strategy-engine": "workspace:*"
+		"@agenai/models-quant": "workspace:*"
 	},
 	"devDependencies": {
 		"rimraf": "^5.0.5"

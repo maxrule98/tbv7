@@ -1,4 +1,4 @@
-import { PositionSide } from "@agenai/core";
+import { PositionSide, createLogger } from "@agenai/core";
 import { MexcClient } from "@agenai/exchange-mexc";
 import { TradePlan } from "@agenai/risk-engine";
 import {
@@ -6,6 +6,8 @@ import {
 	PaperAccount,
 	PaperAccountSnapshot,
 } from "./paperAccount";
+
+const paperLogger = createLogger("execution-engine:paper");
 
 export type ExecutionMode = "paper" | "live";
 
@@ -219,12 +221,9 @@ export class ExecutionEngine {
 		symbol: string,
 		snapshot: PaperAccountSnapshot
 	): void {
-		console.log(
-			JSON.stringify({
-				event: "paper_account_update",
-				symbol,
-				snapshot,
-			})
-		);
+		paperLogger.info("paper_account_update", {
+			symbol,
+			snapshot,
+		});
 	}
 }

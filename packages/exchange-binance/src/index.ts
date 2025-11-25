@@ -1,5 +1,8 @@
 import ccxt from "ccxt";
 import type { Exchange, OHLCV, Order } from "ccxt";
+import { createLogger } from "@agenai/core";
+
+const binanceLogger = createLogger("exchange:binance");
 
 export interface BinanceClientOptions {
 	apiKey: string;
@@ -94,9 +97,10 @@ const configureFuturesTestnet = (exchange: Exchange): void => {
 	const testUrls = urls.test as Record<string, string> | undefined;
 
 	if (!testUrls) {
-		console.warn(
-			"BinanceClient: futures testnet endpoints are unavailable; falling back to production URLs."
-		);
+		binanceLogger.warn("futures_testnet_unavailable", {
+			message:
+				"Futures testnet endpoints unavailable; falling back to production URLs.",
+		});
 		return;
 	}
 

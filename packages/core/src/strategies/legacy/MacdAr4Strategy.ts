@@ -1,6 +1,9 @@
-import { Candle, PositionSide, TradeIntent } from "@agenai/core";
+import { Candle, PositionSide, TradeIntent } from "../../types";
+import { createLogger } from "../../utils/logger";
 import { calculateATR, calculateRSI, ema, macd } from "@agenai/indicators";
 import { ar4Forecast } from "@agenai/models-quant";
+
+const legacyLogger = createLogger("strategy:macd_ar4_v2");
 
 export interface HigherTimeframeTrend {
 	macdHist: number | null;
@@ -296,20 +299,17 @@ export class MacdAr4Strategy {
 			checks: Record<string, unknown>;
 		}
 	): void {
-		console.log(
-			JSON.stringify({
-				event: "strategy_context",
-				symbol: latest.symbol,
-				timeframe: latest.timeframe,
-				timestamp: new Date(latest.timestamp).toISOString(),
-				htfTrend: context.htfTrend,
-				rsi: context.rsi,
-				atr: context.atr,
-				macd1mHist: context.macd1mHist,
-				forecast: context.forecast,
-				confluenceChecks: context.checks,
-			})
-		);
+		legacyLogger.info("strategy_context", {
+			symbol: latest.symbol,
+			timeframe: latest.timeframe,
+			timestamp: new Date(latest.timestamp).toISOString(),
+			htfTrend: context.htfTrend,
+			rsi: context.rsi,
+			atr: context.atr,
+			macd1mHist: context.macd1mHist,
+			forecast: context.forecast,
+			confluenceChecks: context.checks,
+		});
 	}
 
 	private computeHistogramSeries(closes: number[]): number[] {

@@ -1,5 +1,7 @@
 import ccxt, { Balances, Exchange, OHLCV, Order, Position } from "ccxt";
-import { Candle, PositionSide } from "@agenai/core";
+import { Candle, PositionSide, createLogger } from "@agenai/core";
+
+const mexcLogger = createLogger("exchange:mexc");
 
 export interface MexcClientOptions {
 	apiKey?: string;
@@ -106,7 +108,10 @@ export class MexcClient {
 					: null,
 			};
 		} catch (error) {
-			console.warn("MexcClient.getPosition failed", error);
+			mexcLogger.warn("get_position_failed", {
+				symbol,
+				error: error instanceof Error ? error.message : "Unknown error",
+			});
 			return MexcClient.emptyPosition();
 		}
 	}

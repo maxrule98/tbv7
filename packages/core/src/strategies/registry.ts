@@ -1,9 +1,4 @@
 import {
-	loadStrategyConfig,
-	MacdAr4StrategyConfig,
-	MomentumV3StrategyConfig,
-} from "../config";
-import {
 	VWAPDeltaGammaConfig,
 	VWAPDeltaGammaStrategy,
 	loadVWAPDeltaGammaConfig,
@@ -31,28 +26,10 @@ export interface StrategyDefinition<
 }
 
 type StrategyDefinitionMap = {
-	macd_ar4_v2: StrategyDefinition<MacdAr4StrategyConfig>;
-	momentum_v3: StrategyDefinition<MomentumV3StrategyConfig>;
 	vwap_delta_gamma: StrategyDefinition<
 		VWAPDeltaGammaConfig,
 		typeof VWAPDeltaGammaStrategy
 	>;
-};
-
-type StrategyEngineModule = {
-	MacdAr4Strategy: StrategyConstructor;
-	MomentumV3Strategy: StrategyConstructor;
-};
-
-const STRATEGY_ENGINE_MODULE_ID = "@agenai/strategy-engine";
-
-const loadStrategyEngineModule = async (): Promise<StrategyEngineModule> => {
-	const moduleId: string = STRATEGY_ENGINE_MODULE_ID;
-	const mod = (await import(moduleId)) as Partial<StrategyEngineModule>;
-	if (!mod.MacdAr4Strategy || !mod.MomentumV3Strategy) {
-		throw new Error("Failed to load @agenai/strategy-engine exports");
-	}
-	return mod as StrategyEngineModule;
 };
 
 const ensureStrategyId = (
@@ -70,36 +47,6 @@ const ensureStrategyId = (
 };
 
 const strategyRegistry: StrategyDefinitionMap = {
-	macd_ar4_v2: {
-		id: "macd_ar4_v2",
-		className: "MacdAr4Strategy",
-		defaultProfile: "macd_ar4",
-		loadConfig: ({ configDir, profile } = {}) => {
-			const config = loadStrategyConfig(
-				configDir,
-				profile ?? "macd_ar4"
-			) as MacdAr4StrategyConfig;
-			ensureStrategyId("macd_ar4_v2", config.id, profile);
-			return config;
-		},
-		resolveStrategyClass: async () =>
-			(await loadStrategyEngineModule()).MacdAr4Strategy,
-	},
-	momentum_v3: {
-		id: "momentum_v3",
-		className: "MomentumV3Strategy",
-		defaultProfile: "momentum_v3",
-		loadConfig: ({ configDir, profile } = {}) => {
-			const config = loadStrategyConfig(
-				configDir,
-				profile ?? "momentum_v3"
-			) as MomentumV3StrategyConfig;
-			ensureStrategyId("momentum_v3", config.id, profile);
-			return config;
-		},
-		resolveStrategyClass: async () =>
-			(await loadStrategyEngineModule()).MomentumV3Strategy,
-	},
 	vwap_delta_gamma: {
 		id: "vwap_delta_gamma",
 		className: "VWAPDeltaGammaStrategy",

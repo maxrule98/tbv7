@@ -8,11 +8,9 @@
 		"build": "tsc -p tsconfig.build.json"
 	},
 	"dependencies": {
-		"@agenai/indicators": "workspace:*",
 		"@agenai/core": "workspace:*",
 		"@agenai/exchange-mexc": "workspace:*",
 		"@agenai/execution-engine": "workspace:*",
-		"@agenai/risk-engine": "workspace:*",
-		"@agenai/strategy-engine": "workspace:*"
+		"@agenai/risk-engine": "workspace:*"
 	}
 }

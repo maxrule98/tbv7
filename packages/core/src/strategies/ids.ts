@@ -1,8 +1,4 @@
-export const STRATEGY_IDS = [
-	"macd_ar4_v2",
-	"momentum_v3",
-	"vwap_delta_gamma",
-] as const;
+export const STRATEGY_IDS = ["vwap_delta_gamma"] as const;
 
 export type StrategyId = (typeof STRATEGY_IDS)[number];
 

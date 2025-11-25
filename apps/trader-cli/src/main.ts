@@ -1,82 +1,40 @@
-import {
-	StrategyConfig,
-	StrategyId,
-	VWAPDeltaGammaConfig,
-	createLogger,
-	getStrategyDefinition,
-	loadAgenaiConfig,
-	resolveStrategySelection,
-} from "@agenai/core";
-import {
-	StartTraderOptions,
-	createVwapStrategyBuilder,
-	startTrader,
-} from "@agenai/trader-runtime";
+import { StrategyId, createLogger, loadAgenaiConfig } from "@agenai/core";
+import { createVwapStrategyBuilder, startTrader } from "@agenai/trader-runtime";
 
 const logger = createLogger("trader-cli");
+
+const SUPPORTED_STRATEGY_ID: StrategyId = "vwap_delta_gamma";
 
 const main = async (): Promise<void> => {
 	const config = loadAgenaiConfig();
 	const exchange = config.exchange;
-	const defaultStrategyId = config.strategy.id as StrategyId;
 	const argv = process.argv.slice(2);
 
-	const selection = resolveStrategySelection({
-		requestedValue: getStrategyArg(argv),
-		envValue: process.env.TRADER_STRATEGY,
-		defaultStrategyId,
-	});
-
-	selection.invalidSources.forEach(({ source, value }) =>
-		logger.warn("cli_strategy_invalid", { source, value })
-	);
-
-	let strategyConfig = config.strategy as StrategyConfig;
-	let vwapConfig: VWAPDeltaGammaConfig | null = null;
-	if (selection.resolvedStrategyId === "vwap_delta_gamma") {
-		const definition =
-			getStrategyDefinition<VWAPDeltaGammaConfig>("vwap_delta_gamma");
-		vwapConfig = definition.loadConfig();
-	} else if (strategyConfig.id !== selection.resolvedStrategyId) {
-		const definition = getStrategyDefinition<StrategyConfig>(
-			selection.resolvedStrategyId
-		);
-		strategyConfig = definition.loadConfig() as StrategyConfig;
-		config.strategy = strategyConfig;
-	}
-
-	const symbol =
-		config.env.defaultSymbol || exchange.defaultSymbol || strategyConfig.symbol;
-	const timeframe =
-		selection.resolvedStrategyId === "vwap_delta_gamma"
-			? vwapConfig!.timeframes.execution
-			: config.env.defaultTimeframe || strategyConfig.timeframe;
-
-	logger.info("cli_started", {
-		defaultStrategyId,
-		resolvedStrategyId: selection.resolvedStrategyId,
-		symbol,
-		timeframe,
-	});
-	logger.info("cli_strategy_selection", {
-		requestedStrategy: selection.requestedValue ?? null,
-		envStrategy: selection.envValue ?? null,
-		defaultStrategyId,
-		resolvedStrategyId: selection.resolvedStrategyId,
-		isDefault: selection.resolvedStrategyId === defaultStrategyId,
-		symbol,
-		timeframe,
-	});
-
-	const traderOptions: StartTraderOptions = {
-		agenaiConfig: config,
-	};
-	if (selection.resolvedStrategyId === "vwap_delta_gamma" && vwapConfig) {
-		traderOptions.strategyBuilder = createVwapStrategyBuilder({
-			symbol,
-			config: vwapConfig,
+	const requestedStrategy =
+		getStrategyArg(argv) ?? process.env.TRADER_STRATEGY ?? undefined;
+	if (requestedStrategy && requestedStrategy !== SUPPORTED_STRATEGY_ID) {
+		logger.warn("cli_strategy_override_ignored", {
+			requestedStrategy,
+			supportedStrategy: SUPPORTED_STRATEGY_ID,
 		});
 	}
+
+	const strategyConfig = config.strategy;
+	const symbol =
+		config.env.defaultSymbol ||
+		exchange.defaultSymbol ||
+		strategyConfig.symbol ||
+		"BTC/USDT";
+	const timeframe =
+		config.env.defaultTimeframe || strategyConfig.timeframes.execution;
+
+	logger.info("cli_starting", {
+		resolvedStrategyId: SUPPORTED_STRATEGY_ID,
+		symbol,
+		timeframe,
+		requestedStrategy: requestedStrategy ?? null,
+		useTestnet: exchange.testnet ?? false,
+	});
 
 	await startTrader(
 		{
@@ -84,9 +42,15 @@ const main = async (): Promise<void> => {
 			timeframe,
 			useTestnet: exchange.testnet ?? false,
 			executionMode: config.env.executionMode,
-			strategyId: selection.resolvedStrategyId,
+			strategyId: SUPPORTED_STRATEGY_ID,
 		},
-		traderOptions
+		{
+			agenaiConfig: config,
+			strategyBuilder: createVwapStrategyBuilder({
+				symbol,
+				config: strategyConfig,
+			}),
+		}
 	);
 };
 

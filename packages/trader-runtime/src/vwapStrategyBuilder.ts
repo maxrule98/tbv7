@@ -9,7 +9,7 @@ import {
 	createLogger,
 	createVWAPDeltaGammaCache,
 } from "@agenai/core";
-import { TraderStrategy } from "./startTrader";
+import type { TraderStrategy } from "./types";
 
 const logger = createLogger("vwap-strategy-builder");
 
