@@ -1,4 +1,7 @@
-export const STRATEGY_IDS = ["vwap_delta_gamma"] as const;
+export const STRATEGY_IDS = [
+	"vwap_delta_gamma",
+	"ultra_aggressive_btc_usdt",
+] as const;
 
 export type StrategyId = (typeof STRATEGY_IDS)[number];
 

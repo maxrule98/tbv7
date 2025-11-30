@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 
 import type { StrategyId } from "./strategies/ids";
 import type { VWAPDeltaGammaConfig } from "./strategies/vwap-delta-gamma/VWAPDeltaGammaStrategy";
+import type { UltraAggressiveBtcUsdtConfig } from "./strategies/ultra-aggressive-btc-usdt/UltraAggressiveBtcUsdtStrategy";
 export type { StrategyId } from "./strategies/ids";
 
 let envLoaded = false;
@@ -25,6 +26,15 @@ type VwapStrategyConfigFile = VWAPDeltaGammaConfig & {
 	id?: StrategyId;
 	symbol?: string;
 };
+
+type UltraAggressiveStrategyConfigFile = UltraAggressiveBtcUsdtConfig & {
+	id?: StrategyId;
+	symbol?: string;
+};
+
+type StrategyConfigFile =
+	| VwapStrategyConfigFile
+	| UltraAggressiveStrategyConfigFile;
 
 interface RiskConfigFile {
 	maxLeverage: number;
@@ -65,10 +75,12 @@ export interface ExchangeConfig extends ExchangeConfigFile {
 	};
 }
 
-export interface StrategyConfig extends VWAPDeltaGammaConfig {
-	id: "vwap_delta_gamma";
-	symbol?: string;
-}
+export type StrategyConfig =
+	| (VWAPDeltaGammaConfig & { id: "vwap_delta_gamma"; symbol?: string })
+	| (UltraAggressiveBtcUsdtConfig & {
+			id: "ultra_aggressive_btc_usdt";
+			symbol?: string;
+	  });
 export interface RiskConfig {
 	maxLeverage: number;
 	riskPerTradePercent: number;
@@ -226,16 +238,36 @@ const resolveStrategyConfigPath = (
 	);
 };
 
+const inferStrategyIdFromProfile = (profile: string): StrategyId => {
+	if (profile.includes("ultra")) {
+		return "ultra_aggressive_btc_usdt";
+	}
+	return "vwap_delta_gamma";
+};
+
 export const loadStrategyConfig = (
 	strategyDir = getDefaultStrategyDir(),
 	strategyProfile = "vwap-delta-gamma"
 ): StrategyConfig => {
 	const strategyPath = resolveStrategyConfigPath(strategyDir, strategyProfile);
-	const file = readJsonFile<VwapStrategyConfigFile>(strategyPath);
-	return {
-		...file,
-		id: "vwap_delta_gamma",
-	};
+	const file = readJsonFile<StrategyConfigFile>(strategyPath);
+	const strategyId =
+		(file.id as StrategyId | undefined) ??
+		inferStrategyIdFromProfile(strategyProfile);
+	switch (strategyId) {
+		case "vwap_delta_gamma":
+			return {
+				...(file as VwapStrategyConfigFile),
+				id: "vwap_delta_gamma",
+			};
+		case "ultra_aggressive_btc_usdt":
+			return {
+				...(file as UltraAggressiveStrategyConfigFile),
+				id: "ultra_aggressive_btc_usdt",
+			};
+		default:
+			throw new Error(`Unsupported strategy id in config: ${strategyId}`);
+	}
 };
 
 export const loadRiskConfig = (

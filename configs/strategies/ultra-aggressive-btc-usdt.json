@@ -1,0 +1,43 @@
+{
+	"id": "ultra_aggressive_btc_usdt",
+	"name": "Ultra Aggressive BTC/USDT",
+	"symbol": "BTC/USDT",
+	"timeframes": {
+		"execution": "1m",
+		"confirming": "5m",
+		"context": "15m"
+	},
+	"cacheTTLms": 2500,
+	"atrPeriod1m": 14,
+	"atrPeriod5m": 14,
+	"emaFastPeriod": 9,
+	"emaSlowPeriod": 21,
+	"rsiPeriod": 14,
+	"lookbacks": {
+		"executionBars": 200,
+		"breakoutRange": 40,
+		"rangeDetection": 60,
+		"trendCandles": 36,
+		"volatility": 48,
+		"cvd": 120
+	},
+	"thresholds": {
+		"vwapStretchPct": 0.0035,
+		"breakoutVolumeMultiple": 1.6,
+		"breakoutAtrMultiple": 0.8,
+		"meanRevStretchAtr": 0.6,
+		"liquiditySweepWickMultiple": 1.2,
+		"trapVolumeMaxMultiple": 1.1,
+		"cvdDivergenceThreshold": 3,
+		"rsiOverbought": 74,
+		"rsiOversold": 26
+	},
+	"risk": {
+		"riskPerTradePct": 0.015,
+		"atrStopMultiple": 1.2,
+		"partialTpRR": 0.8,
+		"finalTpRR": 2.2,
+		"trailingAtrMultiple": 1.1
+	},
+	"maxTradeDurationMinutes": 90
+}

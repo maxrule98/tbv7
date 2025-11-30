@@ -1,7 +1,13 @@
-import { StrategyConfig, StrategyId } from "@agenai/core";
+import {
+	StrategyConfig,
+	StrategyId,
+	UltraAggressiveBtcUsdtConfig,
+	VWAPDeltaGammaConfig,
+} from "@agenai/core";
 import { MexcClient } from "@agenai/exchange-mexc";
 import type { TraderStrategy } from "./types";
 import { createVwapStrategyBuilder } from "./vwapStrategyBuilder";
+import { createUltraAggressiveStrategyBuilder } from "./ultraAggressiveStrategyBuilder";
 
 interface StrategyBuilderContext {
 	strategyConfig: StrategyConfig;
@@ -17,7 +23,12 @@ const strategyBuilders: Record<StrategyId, StrategyBuilderFactory> = {
 	vwap_delta_gamma: ({ strategyConfig, symbol }) =>
 		createVwapStrategyBuilder({
 			symbol,
-			config: strategyConfig,
+			config: strategyConfig as VWAPDeltaGammaConfig,
+		}),
+	ultra_aggressive_btc_usdt: ({ strategyConfig, symbol }) =>
+		createUltraAggressiveStrategyBuilder({
+			symbol,
+			config: strategyConfig as UltraAggressiveBtcUsdtConfig,
 		}),
 };
 

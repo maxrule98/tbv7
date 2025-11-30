@@ -3,6 +3,11 @@ import {
 	VWAPDeltaGammaStrategy,
 	loadVWAPDeltaGammaConfig,
 } from "./vwap-delta-gamma/VWAPDeltaGammaStrategy";
+import {
+	UltraAggressiveBtcUsdtConfig,
+	UltraAggressiveBtcUsdtStrategy,
+	loadUltraAggressiveConfig,
+} from "./ultra-aggressive-btc-usdt/UltraAggressiveBtcUsdtStrategy";
 import { STRATEGY_IDS, isStrategyId, StrategyId } from "./ids";
 
 export interface StrategyConfigLoaderOptions {
@@ -30,6 +35,10 @@ type StrategyDefinitionMap = {
 		VWAPDeltaGammaConfig,
 		typeof VWAPDeltaGammaStrategy
 	>;
+	ultra_aggressive_btc_usdt: StrategyDefinition<
+		UltraAggressiveBtcUsdtConfig,
+		typeof UltraAggressiveBtcUsdtStrategy
+	>;
 };
 
 const strategyRegistry: StrategyDefinitionMap = {
@@ -39,6 +48,13 @@ const strategyRegistry: StrategyDefinitionMap = {
 		configPath: "configs/strategies/vwap-delta-gamma.json",
 		loadConfig: ({ configPath } = {}) => loadVWAPDeltaGammaConfig(configPath),
 		resolveStrategyClass: async () => VWAPDeltaGammaStrategy,
+	},
+	ultra_aggressive_btc_usdt: {
+		id: "ultra_aggressive_btc_usdt",
+		className: "UltraAggressiveBtcUsdtStrategy",
+		configPath: "configs/strategies/ultra-aggressive-btc-usdt.json",
+		loadConfig: ({ configPath } = {}) => loadUltraAggressiveConfig(configPath),
+		resolveStrategyClass: async () => UltraAggressiveBtcUsdtStrategy,
 	},
 };
 

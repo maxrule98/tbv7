@@ -2,6 +2,7 @@ export * from "./config";
 export * from "./types";
 export * from "./data/multiTimeframeCache";
 export * from "./strategies/vwap-delta-gamma/VWAPDeltaGammaStrategy";
+export * from "./strategies/ultra-aggressive-btc-usdt/UltraAggressiveBtcUsdtStrategy";
 export * from "./strategies/registry";
 export * from "./strategies/ids";
 export * from "./strategies/selection";
