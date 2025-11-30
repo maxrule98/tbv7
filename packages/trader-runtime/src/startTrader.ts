@@ -637,6 +637,7 @@ const logCandle = (candle: Candle): void => {
 const logStrategyDecision = (candle: Candle, intent: TradeIntent): void => {
 	logger.info("strategy_decision", {
 		symbol: candle.symbol,
+		timeframe: candle.timeframe,
 		timestamp: new Date(candle.timestamp).toISOString(),
 		close: candle.close,
 		intent: intent.intent,
@@ -651,8 +652,9 @@ const logTradePlan = (
 ): void => {
 	logger.info("trade_plan", {
 		symbol: plan.symbol,
+		timeframe: candle.timeframe,
 		timestamp: new Date(candle.timestamp).toISOString(),
-		intent: plan.reason,
+		intent: intent.intent,
 		side: plan.side,
 		quantity: plan.quantity,
 		stopLossPrice: plan.stopLossPrice,

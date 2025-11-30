@@ -12,7 +12,10 @@ import { startTrader } from "@agenai/trader-runtime";
 const logger = createLogger("trader-server");
 
 const main = async (): Promise<void> => {
-	console.info("Starting AgenAI Trader Server...");
+	logger.info("server_start", {
+		env: process.env.NODE_ENV ?? "development",
+		pid: process.pid,
+	});
 
 	const config = loadAgenaiConfig();
 	const exchange = config.exchange;
@@ -55,7 +58,10 @@ const main = async (): Promise<void> => {
 		},
 		{ agenaiConfig: config }
 	).catch((error) => {
-		console.error("Trader runtime failed:", error);
+		logger.error("runtime_failed", {
+			message: error instanceof Error ? error.message : String(error),
+			stack: error instanceof Error ? error.stack : undefined,
+		});
 		process.exit(1);
 	});
 
@@ -66,7 +72,7 @@ const main = async (): Promise<void> => {
 	});
 
 	server.listen(port, () => {
-		console.info(`HTTP health server listening on port ${port}`);
+		logger.info("health_server_listening", { port });
 	});
 };
 
@@ -84,6 +90,9 @@ const getStrategyArg = (argv: string[]): string | undefined => {
 };
 
 main().catch((error) => {
-	console.error("Fatal error in trader-server:", error);
+	logger.error("server_fatal", {
+		message: error instanceof Error ? error.message : String(error),
+		stack: error instanceof Error ? error.stack : undefined,
+	});
 	process.exit(1);
 });

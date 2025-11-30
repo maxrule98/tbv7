@@ -32,20 +32,6 @@ type StrategyDefinitionMap = {
 	>;
 };
 
-const ensureStrategyId = (
-	expected: StrategyId,
-	actual: StrategyId,
-	profile?: string
-): void => {
-	if (expected !== actual) {
-		throw new Error(
-			`Strategy profile ${
-				profile ?? "default"
-			} resolved to ${actual}, expected ${expected}`
-		);
-	}
-};
-
 const strategyRegistry: StrategyDefinitionMap = {
 	vwap_delta_gamma: {
 		id: "vwap_delta_gamma",
