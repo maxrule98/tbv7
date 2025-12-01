@@ -45,14 +45,14 @@ const strategyRegistry: StrategyDefinitionMap = {
 	vwap_delta_gamma: {
 		id: "vwap_delta_gamma",
 		className: "VWAPDeltaGammaStrategy",
-		configPath: "configs/strategies/vwap-delta-gamma.json",
+		configPath: "config/strategies/vwap-delta-gamma.json",
 		loadConfig: ({ configPath } = {}) => loadVWAPDeltaGammaConfig(configPath),
 		resolveStrategyClass: async () => VWAPDeltaGammaStrategy,
 	},
 	ultra_aggressive_btc_usdt: {
 		id: "ultra_aggressive_btc_usdt",
 		className: "UltraAggressiveBtcUsdtStrategy",
-		configPath: "configs/strategies/ultra-aggressive-btc-usdt.json",
+		configPath: "config/strategies/ultra-aggressive-btc-usdt.json",
 		loadConfig: ({ configPath } = {}) => loadUltraAggressiveConfig(configPath),
 		resolveStrategyClass: async () => UltraAggressiveBtcUsdtStrategy,
 	},
