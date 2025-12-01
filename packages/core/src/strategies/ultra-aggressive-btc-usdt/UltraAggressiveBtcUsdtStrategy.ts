@@ -990,7 +990,7 @@ export const createUltraAggressiveCache = (
 export const loadUltraAggressiveConfig = (
 	configPath = path.join(
 		getWorkspaceRoot(),
-		"configs",
+		"config",
 		"strategies",
 		"ultra-aggressive-btc-usdt.json"
 	)
