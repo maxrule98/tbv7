@@ -344,46 +344,46 @@ const startPolling = async (
 					continue;
 				}
 
-				const intent = await strategy.decide(buffer, positionState.side);
+				const intent = enrichIntentMetadata(
+					await strategy.decide(buffer, positionState.side)
+				);
 				logStrategyDecision(latest, intent);
 
-				if (intent.intent === "OPEN_LONG" || intent.intent === "CLOSE_LONG") {
-					const plan = riskManager.plan(
-						intent,
-						latest.close,
-						accountEquity,
-						positionState.size
-					);
-					if (!plan) {
-						logExecutionSkipped(
-							intent,
-							positionState.side,
-							intent.intent === "CLOSE_LONG"
+				const plan = riskManager.plan(
+					intent,
+					latest.close,
+					accountEquity,
+					positionState
+				);
+				if (!plan) {
+					if (intent.intent !== "NO_ACTION") {
+						const reason =
+							intent.intent === "CLOSE_LONG" || intent.intent === "CLOSE_SHORT"
 								? "no_position_to_close"
-								: "risk_plan_rejected"
-						);
+								: "risk_plan_rejected";
+						logExecutionSkipped(intent, positionState.side, reason);
+					}
+				} else {
+					const skipReason = getPreExecutionSkipReason(plan, positionState);
+					if (skipReason) {
+						logExecutionSkipped(plan, positionState.side, skipReason);
 					} else {
-						const skipReason = getPreExecutionSkipReason(plan, positionState);
-						if (skipReason) {
-							logExecutionSkipped(plan, positionState.side, skipReason);
-						} else {
-							logTradePlan(plan, latest, intent);
-							try {
-								const result = await executionEngine.execute(plan, {
-									price: latest.close,
-								});
-								if (result.status === "skipped") {
-									logExecutionSkipped(
-										plan,
-										positionState.side,
-										result.reason ?? "execution_engine_skip"
-									);
-								} else {
-									logExecutionResult(result);
-								}
-							} catch (error) {
-								logExecutionError(error, plan);
+						logTradePlan(plan, latest, intent);
+						try {
+							const result = await executionEngine.execute(plan, {
+								price: latest.close,
+							});
+							if (result.status === "skipped") {
+								logExecutionSkipped(
+									plan,
+									positionState.side,
+									result.reason ?? "execution_engine_skip"
+								);
+							} else {
+								logExecutionResult(result);
 							}
+						} catch (error) {
+							logExecutionError(error, plan);
 						}
 					}
 				}
@@ -420,27 +420,41 @@ const maybeHandleForcedExit = async (
 	executionEngine: ExecutionEngine,
 	accountEquity: number
 ): Promise<boolean> => {
-	if (positionState.side !== "LONG" || positionState.size <= 0) {
+	if (positionState.side === "FLAT" || positionState.size <= 0) {
 		return false;
 	}
 
 	const stopLossPrice = positionState.stopLossPrice;
 	const takeProfitPrice = positionState.takeProfitPrice;
+	const isLong = positionState.side === "LONG";
 	const hitSL =
-		typeof stopLossPrice === "number" && lastCandle.low <= stopLossPrice;
+		typeof stopLossPrice === "number" &&
+		(isLong
+			? lastCandle.low <= stopLossPrice
+			: lastCandle.high >= stopLossPrice);
 	const hitTP =
-		typeof takeProfitPrice === "number" && lastCandle.high >= takeProfitPrice;
+		typeof takeProfitPrice === "number" &&
+		(isLong
+			? lastCandle.high >= takeProfitPrice
+			: lastCandle.low <= takeProfitPrice);
 
 	if (!hitSL && !hitTP) {
 		return false;
 	}
 
-	const reason = hitSL ? "stop_loss_hit" : "take_profit_hit";
+	// Mirror SL/TP triggers for both directions so shorts respect the same safety rails.
+	const reasonBase = hitSL ? "stop_loss_hit" : "take_profit_hit";
+	const reason = isLong ? reasonBase : `short_${reasonBase}`;
+	const intentType = isLong ? "CLOSE_LONG" : "CLOSE_SHORT";
+	const orderSide = isLong ? "sell" : "buy";
 	const forcedIntent: TradeIntent = {
 		symbol: lastCandle.symbol,
-		intent: "CLOSE_LONG",
+		intent: intentType,
 		reason,
 		timestamp: lastCandle.timestamp,
+		positionSide: isLong ? "LONG" : "SHORT",
+		action: "CLOSE",
+		side: orderSide,
 	};
 
 	logStrategyDecision(lastCandle, forcedIntent);
@@ -449,7 +463,7 @@ const maybeHandleForcedExit = async (
 		forcedIntent,
 		lastCandle.close,
 		accountEquity,
-		positionState.size
+		positionState
 	);
 	if (!plan) {
 		logExecutionSkipped(
@@ -496,7 +510,7 @@ const maybeHandleTrailingStop = async (
 	accountEquity: number,
 	riskConfig: RiskConfig
 ): Promise<boolean> => {
-	if (positionState.side !== "LONG" || positionState.size <= 0) {
+	if (positionState.side === "FLAT" || positionState.size <= 0) {
 		return false;
 	}
 
@@ -513,20 +527,27 @@ const maybeHandleTrailingStop = async (
 	if (trailPct <= 0) {
 		return false;
 	}
+	const isLong = positionState.side === "LONG";
 
 	let isTrailingActive = positionState.isTrailingActive;
 	let peakPrice =
 		positionState.peakPrice > 0 ? positionState.peakPrice : entryPrice;
+	let troughPrice =
+		positionState.troughPrice > 0 ? positionState.troughPrice : entryPrice;
 	let trailingStopPrice =
 		positionState.trailingStopPrice > 0
 			? positionState.trailingStopPrice
 			: positionState.stopLossPrice ?? 0;
 	const updates: Partial<PaperPositionSnapshot> = {};
 
-	if (
-		!isTrailingActive &&
-		lastCandle.close >= entryPrice * (1 + activationPct)
-	) {
+	const activationBarrier = isLong
+		? entryPrice * (1 + activationPct)
+		: entryPrice * (1 - activationPct);
+	const activationTriggered = isLong
+		? lastCandle.close >= activationBarrier
+		: lastCandle.close <= activationBarrier;
+
+	if (!isTrailingActive && activationTriggered) {
 		isTrailingActive = true;
 		updates.isTrailingActive = true;
 	}
@@ -538,29 +559,53 @@ const maybeHandleTrailingStop = async (
 		return false;
 	}
 
-	peakPrice = Math.max(peakPrice, lastCandle.high);
-	const proposedTrailing = peakPrice * (1 - trailPct);
-	if (peakPrice !== positionState.peakPrice) {
-		updates.peakPrice = peakPrice;
-	}
-	if (proposedTrailing > trailingStopPrice) {
-		trailingStopPrice = proposedTrailing;
-		updates.trailingStopPrice = trailingStopPrice;
+	let proposedTrailing = trailingStopPrice;
+	// Track favorable extremes separately so both long and short trails ratchet toward price.
+	if (isLong) {
+		peakPrice = Math.max(peakPrice, lastCandle.high);
+		proposedTrailing = peakPrice * (1 - trailPct);
+		if (peakPrice !== positionState.peakPrice) {
+			updates.peakPrice = peakPrice;
+		}
+		if (proposedTrailing > trailingStopPrice) {
+			trailingStopPrice = proposedTrailing;
+			updates.trailingStopPrice = trailingStopPrice;
+		}
+	} else {
+		troughPrice = Math.min(troughPrice, lastCandle.low);
+		proposedTrailing = troughPrice * (1 + trailPct);
+		if (troughPrice !== positionState.troughPrice) {
+			updates.troughPrice = troughPrice;
+		}
+		if (trailingStopPrice === 0 || proposedTrailing < trailingStopPrice) {
+			trailingStopPrice = proposedTrailing;
+			updates.trailingStopPrice = trailingStopPrice;
+		}
 	}
 
 	if (Object.keys(updates).length) {
 		executionEngine.updatePosition(symbol, updates);
 	}
 
-	if (trailingStopPrice <= 0 || lastCandle.low > trailingStopPrice) {
+	const stopStillValid = trailingStopPrice > 0;
+	const stopTriggered = isLong
+		? lastCandle.low <= trailingStopPrice
+		: lastCandle.high >= trailingStopPrice;
+	if (!stopStillValid || !stopTriggered) {
 		return false;
 	}
 
+	const reason = isLong ? "trailing_stop_hit" : "short_trailing_stop_hit";
+	const intentType = isLong ? "CLOSE_LONG" : "CLOSE_SHORT";
+	const orderSide = isLong ? "sell" : "buy";
 	const forcedIntent: TradeIntent = {
 		symbol,
-		intent: "CLOSE_LONG",
-		reason: "trailing_stop_hit",
+		intent: intentType,
+		reason: reason,
 		timestamp: lastCandle.timestamp,
+		positionSide: isLong ? "LONG" : "SHORT",
+		action: "CLOSE",
+		side: orderSide,
 	};
 
 	logStrategyDecision(lastCandle, forcedIntent);
@@ -569,7 +614,7 @@ const maybeHandleTrailingStop = async (
 		forcedIntent,
 		lastCandle.close,
 		accountEquity,
-		positionState.size
+		positionState
 	);
 	if (!plan) {
 		logExecutionSkipped(
@@ -655,6 +700,8 @@ const logTradePlan = (
 		timeframe: candle.timeframe,
 		timestamp: new Date(candle.timestamp).toISOString(),
 		intent: intent.intent,
+		action: plan.action,
+		positionSide: plan.positionSide,
 		side: plan.side,
 		quantity: plan.quantity,
 		stopLossPrice: plan.stopLossPrice,
@@ -688,6 +735,8 @@ const logExecutionError = (error: unknown, plan: TradePlan): void => {
 	logger.error("execution_error", {
 		symbol: plan.symbol,
 		side: plan.side,
+		action: plan.action,
+		positionSide: plan.positionSide,
 		quantity: plan.quantity,
 		message: error instanceof Error ? error.message : String(error),
 	});
@@ -704,23 +753,44 @@ const logExecutionSkipped = (
 	positionSide: PositionSide,
 	reason: string
 ): void => {
-	logger.info("execution_skipped", {
+	const payload: Record<string, unknown> = {
 		symbol: planOrIntent.symbol,
-		side: "side" in planOrIntent ? planOrIntent.side : planOrIntent.intent,
 		positionSide,
 		reason,
-	});
+	};
+	if ("type" in planOrIntent) {
+		payload.action = planOrIntent.action;
+		payload.side = planOrIntent.side;
+		payload.planPositionSide = planOrIntent.positionSide;
+	} else {
+		payload.intent = planOrIntent.intent;
+		payload.side = planOrIntent.side ?? planOrIntent.intent;
+	}
+	logger.info("execution_skipped", payload);
 };
 
 const getPreExecutionSkipReason = (
 	plan: TradePlan,
 	positionState: PaperPositionSnapshot
 ): string | null => {
-	if (plan.side === "buy" && positionState.side === "LONG") {
-		return "already_long";
+	if (plan.action === "OPEN") {
+		if (positionState.side === plan.positionSide) {
+			return "already_in_position";
+		}
+		if (
+			positionState.side !== "FLAT" &&
+			positionState.side !== plan.positionSide
+		) {
+			return "opposite_position_open";
+		}
 	}
-	if (plan.side === "sell" && positionState.side === "FLAT") {
-		return "already_flat";
+	if (plan.action === "CLOSE") {
+		if (positionState.side !== plan.positionSide || positionState.size <= 0) {
+			return "no_position_to_close";
+		}
+	}
+	if (plan.quantity <= 0) {
+		return "invalid_quantity";
 	}
 	return null;
 };
@@ -739,6 +809,7 @@ const logPaperPosition = (
 		takeProfitPrice: position.takeProfitPrice,
 		entryPrice: position.entryPrice,
 		peakPrice: position.peakPrice,
+		troughPrice: position.troughPrice,
 		trailingStopPrice: position.trailingStopPrice,
 		isTrailingActive: position.isTrailingActive,
 	});
@@ -791,11 +862,54 @@ const calculateUnrealizedPnl = (
 	position: PaperPositionSnapshot,
 	price: number
 ): number => {
-	if (position.side !== "LONG" || position.avgEntryPrice === null) {
+	if (position.avgEntryPrice === null || position.size <= 0) {
 		return 0;
 	}
+	if (position.side === "LONG") {
+		return (price - position.avgEntryPrice) * position.size;
+	}
+	if (position.side === "SHORT") {
+		return (position.avgEntryPrice - price) * position.size;
+	}
+	return 0;
+};
 
-	return (price - position.avgEntryPrice) * position.size;
+const enrichIntentMetadata = (intent: TradeIntent): TradeIntent => {
+	if (intent.action && intent.positionSide && intent.side) {
+		return intent;
+	}
+	switch (intent.intent) {
+		case "OPEN_LONG":
+			return {
+				...intent,
+				action: intent.action ?? "OPEN",
+				positionSide: intent.positionSide ?? "LONG",
+				side: intent.side ?? "buy",
+			};
+		case "CLOSE_LONG":
+			return {
+				...intent,
+				action: intent.action ?? "CLOSE",
+				positionSide: intent.positionSide ?? "LONG",
+				side: intent.side ?? "sell",
+			};
+		case "OPEN_SHORT":
+			return {
+				...intent,
+				action: intent.action ?? "OPEN",
+				positionSide: intent.positionSide ?? "SHORT",
+				side: intent.side ?? "sell",
+			};
+		case "CLOSE_SHORT":
+			return {
+				...intent,
+				action: intent.action ?? "CLOSE",
+				positionSide: intent.positionSide ?? "SHORT",
+				side: intent.side ?? "buy",
+			};
+		default:
+			return intent;
+	}
 };
 
 const delay = (ms: number): Promise<void> =>

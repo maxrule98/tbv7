@@ -43,6 +43,7 @@ export interface PaperPositionSnapshot {
 	realizedPnl: number;
 	entryPrice: number;
 	peakPrice: number;
+	troughPrice: number;
 	trailingStopPrice: number;
 	isTrailingActive: boolean;
 	stopLossPrice?: number;
@@ -120,32 +121,31 @@ export class ExecutionEngine {
 		const position = this.ensurePaperPosition(plan.symbol);
 		const fillPrice = context.price;
 
-		if (plan.side === "buy") {
-			position.side = "LONG";
-			position.size = plan.quantity;
-			position.avgEntryPrice = fillPrice;
-			position.entryPrice = fillPrice;
-			position.peakPrice = fillPrice;
-			position.trailingStopPrice = plan.stopLossPrice;
-			position.isTrailingActive = false;
-			position.stopLossPrice = plan.stopLossPrice;
-			position.takeProfitPrice = plan.takeProfitPrice;
-			return {
-				symbol: plan.symbol,
-				side: plan.side,
-				quantity: plan.quantity,
-				status: "paper_filled",
-				price: fillPrice,
-				mode: this.mode,
-				totalRealizedPnl: position.realizedPnl,
-			};
+		if (plan.action === "OPEN") {
+			return this.handlePaperOpen(plan, position, fillPrice);
 		}
 
-		if (
-			position.side !== "LONG" ||
-			position.size <= 0 ||
-			position.avgEntryPrice === null
-		) {
+		if (plan.action === "CLOSE") {
+			return this.handlePaperClose(plan, position, fillPrice);
+		}
+
+		return {
+			symbol: plan.symbol,
+			side: plan.side,
+			quantity: 0,
+			status: "skipped",
+			price: fillPrice,
+			mode: this.mode,
+			reason: "unsupported_action",
+		};
+	}
+
+	private handlePaperOpen(
+		plan: TradePlan,
+		position: PaperPosition,
+		fillPrice: number
+	): ExecutionResult {
+		if (position.side !== "FLAT") {
 			return {
 				symbol: plan.symbol,
 				side: plan.side,
@@ -153,19 +153,69 @@ export class ExecutionEngine {
 				status: "skipped",
 				price: fillPrice,
 				mode: this.mode,
-				reason: "no_long_to_close",
+				reason: "position_not_flat",
+			};
+		}
+
+		// Store both the running peak and trough so trailing logic can tighten either direction.
+		position.side = plan.positionSide;
+		position.size = plan.quantity;
+		position.avgEntryPrice = fillPrice;
+		position.entryPrice = fillPrice;
+		position.peakPrice = fillPrice;
+		position.troughPrice = fillPrice;
+		position.trailingStopPrice = plan.stopLossPrice;
+		position.isTrailingActive = false;
+		position.stopLossPrice = plan.stopLossPrice;
+		position.takeProfitPrice = plan.takeProfitPrice;
+
+		return {
+			symbol: plan.symbol,
+			side: plan.side,
+			quantity: plan.quantity,
+			status: "paper_filled",
+			price: fillPrice,
+			mode: this.mode,
+			totalRealizedPnl: position.realizedPnl,
+		};
+	}
+
+	private handlePaperClose(
+		plan: TradePlan,
+		position: PaperPosition,
+		fillPrice: number
+	): ExecutionResult {
+		if (
+			position.side !== plan.positionSide ||
+			position.size <= 0 ||
+			position.avgEntryPrice === null
+		) {
+			const reason =
+				plan.positionSide === "LONG" ? "no_long_to_close" : "no_short_to_close";
+			return {
+				symbol: plan.symbol,
+				side: plan.side,
+				quantity: 0,
+				status: "skipped",
+				price: fillPrice,
+				mode: this.mode,
+				reason,
 			};
 		}
 
 		const closedQuantity = position.size;
-		const entryPrice = position.avgEntryPrice!;
-		const realizedPnl = (fillPrice - entryPrice) * closedQuantity;
+		const entryPrice = position.avgEntryPrice;
+		// Flip the PnL calculation depending on direction so shorts realize gains when price falls.
+		const realizedPnl =
+			plan.positionSide === "LONG"
+				? (fillPrice - entryPrice) * closedQuantity
+				: (entryPrice - fillPrice) * closedQuantity;
 		position.realizedPnl += realizedPnl;
 
 		if (this.paperAccount) {
 			const closedTrade: ClosedTrade = {
 				symbol: plan.symbol,
-				side: "LONG",
+				side: plan.positionSide,
 				size: closedQuantity,
 				entryPrice,
 				exitPrice: fillPrice,
@@ -176,15 +226,7 @@ export class ExecutionEngine {
 			this.logPaperAccountUpdate(plan.symbol, snapshot);
 		}
 
-		position.side = "FLAT";
-		position.size = 0;
-		position.avgEntryPrice = null;
-		position.entryPrice = 0;
-		position.peakPrice = 0;
-		position.trailingStopPrice = 0;
-		position.isTrailingActive = false;
-		position.stopLossPrice = undefined;
-		position.takeProfitPrice = undefined;
+		this.resetPosition(position);
 
 		return {
 			symbol: plan.symbol,
@@ -198,6 +240,19 @@ export class ExecutionEngine {
 		};
 	}
 
+	private resetPosition(position: PaperPosition): void {
+		position.side = "FLAT";
+		position.size = 0;
+		position.avgEntryPrice = null;
+		position.entryPrice = 0;
+		position.peakPrice = 0;
+		position.troughPrice = 0;
+		position.trailingStopPrice = 0;
+		position.isTrailingActive = false;
+		position.stopLossPrice = undefined;
+		position.takeProfitPrice = undefined;
+	}
+
 	private ensurePaperPosition(symbol: string): PaperPosition {
 		if (!this.paperPositions.has(symbol)) {
 			this.paperPositions.set(symbol, {
@@ -207,6 +262,7 @@ export class ExecutionEngine {
 				realizedPnl: 0,
 				entryPrice: 0,
 				peakPrice: 0,
+				troughPrice: 0,
 				trailingStopPrice: 0,
 				isTrailingActive: false,
 				stopLossPrice: undefined,

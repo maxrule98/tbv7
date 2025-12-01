@@ -9,7 +9,11 @@ export interface Candle {
 	volume: number;
 }
 
-export type PositionSide = "LONG" | "SHORT" | "FLAT";
+export type ActivePositionSide = "LONG" | "SHORT";
+export type PositionSide = ActivePositionSide | "FLAT";
+
+export type TradeAction = "OPEN" | "CLOSE";
+export type TradeOrderSide = "buy" | "sell";
 
 export type TradeIntentType =
 	| "OPEN_LONG"
@@ -23,5 +27,8 @@ export interface TradeIntent {
 	intent: TradeIntentType;
 	reason: string;
 	timestamp?: number;
+	positionSide?: ActivePositionSide;
+	action?: TradeAction;
+	side?: TradeOrderSide;
 	metadata?: Record<string, unknown>;
 }
