@@ -35,13 +35,14 @@ export class MexcClient {
 	async fetchOHLCV(
 		symbol: string,
 		timeframe: string,
-		limit = 500
+		limit = 500,
+		since?: number
 	): Promise<Candle[]> {
 		const marketSymbol = await this.resolveMarketSymbol(symbol);
 		const ohlcv = await this.exchange.fetchOHLCV(
 			marketSymbol,
 			timeframe,
-			undefined,
+			since,
 			limit
 		);
 

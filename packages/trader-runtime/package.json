@@ -5,7 +5,9 @@
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
 	"scripts": {
-		"build": "tsc -p tsconfig.build.json"
+		"build": "tsc -p tsconfig.build.json",
+		"backtest": "pnpm run build && node dist/backtest/backtestCli.js",
+		"test": "vitest run"
 	},
 	"dependencies": {
 		"@agenai/core": "workspace:*",

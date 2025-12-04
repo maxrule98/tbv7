@@ -1,0 +1,17 @@
+{
+	"name": "@agenai/backtester-cli",
+	"version": "1.0.0",
+	"private": true,
+	"main": "dist/index.js",
+	"types": "src/index.ts",
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"dev": "ts-node -r tsconfig-paths/register src/index.ts",
+		"lint": "eslint 'src/**/*.{ts,tsx}' --max-warnings=0 || true",
+		"test": "vitest run --passWithNoTests"
+	},
+	"dependencies": {
+		"@agenai/core": "workspace:*",
+		"@agenai/trader-runtime": "workspace:*"
+	}
+}
