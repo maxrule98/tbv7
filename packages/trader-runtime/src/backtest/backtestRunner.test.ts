@@ -213,4 +213,89 @@ describe("runBacktest", () => {
 			})
 		).rejects.toThrow("No candles loaded for execution timeframe");
 	});
+
+	it("produces trades for the ultra strategy when debug mode is enabled", async () => {
+		const originalDebug = process.env.ULTRA_DEBUG_MODE;
+		const originalDiagnostics = process.env.ULTRA_DIAGNOSTICS;
+		process.env.ULTRA_DEBUG_MODE = "1";
+		process.env.ULTRA_DIAGNOSTICS = "1";
+		const logs: any[] = [];
+		const consoleSpy = vi
+			.spyOn(console, "log")
+			.mockImplementation((value?: unknown) => {
+				if (typeof value === "string") {
+					try {
+						logs.push(JSON.parse(value));
+					} catch {
+						// ignore non-JSON output
+					}
+				}
+			});
+
+		try {
+			const candleCount = 400;
+			const ramp = (count: number, start: number, step: number): number[] =>
+				Array.from({ length: count }, (_, idx) => start + idx * step);
+			const closes1m = ramp(candleCount, 100, 0.4);
+			const closes5m = ramp(Math.ceil(candleCount / 5), 100, 2);
+			const closes15m = ramp(Math.ceil(candleCount / 15), 100, 4);
+			const timeframeData = {
+				"1m": buildCandles("1m", closes1m),
+				"5m": buildCandles("5m", closes5m, baseTimestamp, 5 * 60_000),
+				"15m": buildCandles("15m", closes15m, baseTimestamp, 15 * 60_000),
+			};
+			const startTimestamp = baseTimestamp;
+			const endTimestamp = baseTimestamp + (candleCount - 1) * 60_000;
+			const agenaiConfig = createAgenaiConfig();
+			const mockClient = createMockClient();
+			const backtestConfig = buildBacktestConfig({
+				startTimestamp,
+				endTimestamp,
+				maxCandles: candleCount,
+			});
+
+			const result = await runBacktest(backtestConfig, {
+				agenaiConfig,
+				accountConfig,
+				client: mockClient,
+				timeframeData,
+			});
+
+			const diagEvents = logs.filter(
+				(entry) => entry.event === "ultra_diagnostics"
+			);
+			const diagActivated = diagEvents.some(
+				(event) =>
+					Array.isArray(event.checks) &&
+					(event.checks as Array<Record<string, unknown>>).some(
+						(check) => check.active === true
+					)
+			);
+			const signalEvents = logs.filter(
+				(entry) => entry.event === "strategy_signal"
+			);
+			const openedTrade = signalEvents.some(
+				(event) => event.intent === "OPEN_LONG" || event.intent === "OPEN_SHORT"
+			);
+			const summary = logs.find((entry) => entry.event === "backtest_summary");
+			expect(diagEvents.length).toBeGreaterThan(0);
+			expect(diagActivated).toBe(true);
+			expect(signalEvents.length).toBeGreaterThan(0);
+			expect(openedTrade).toBe(true);
+			expect(summary?.totalTrades).toBeGreaterThan(0);
+			expect(result.trades.length).toBeGreaterThan(0);
+		} finally {
+			consoleSpy.mockRestore();
+			if (originalDebug === undefined) {
+				delete process.env.ULTRA_DEBUG_MODE;
+			} else {
+				process.env.ULTRA_DEBUG_MODE = originalDebug;
+			}
+			if (originalDiagnostics === undefined) {
+				delete process.env.ULTRA_DIAGNOSTICS;
+			} else {
+				process.env.ULTRA_DIAGNOSTICS = originalDiagnostics;
+			}
+		}
+	});
 });

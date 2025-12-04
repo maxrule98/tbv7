@@ -18,6 +18,7 @@ import { createLogger } from "../../utils/logger";
 const strategyLogger = createLogger("ultra-agg-btc-usdt");
 const isUltraDiagnosticsEnabled = (): boolean =>
 	process.env.ULTRA_DIAGNOSTICS === "1";
+const isUltraDebugMode = (): boolean => process.env.ULTRA_DEBUG_MODE === "1";
 
 export type TrendDirection = "TrendingUp" | "TrendingDown" | "Ranging";
 export type VolatilityRegime = "low" | "balanced" | "high";
@@ -867,7 +868,8 @@ const detectTrendIgnition = (
 	const cvdOk =
 		indicator.cvdTrend === (isLong ? "up" : "down") &&
 		indicator.cvdDivergence !== (isLong ? "bearish" : "bullish");
-	const active =
+	const debugMode = isUltraDebugMode();
+	const strictActive =
 		trending &&
 		volOk &&
 		hasVwap &&
@@ -877,6 +879,9 @@ const detectTrendIgnition = (
 		wideBody &&
 		highVolume &&
 		cvdOk;
+	const relaxedActive = trending && volOk && hasVwap && priceAlignment;
+	// Strict mode preserves research-era gates; debug mode relaxes them for exploration.
+	const active = debugMode ? relaxedActive : strictActive;
 	return {
 		name: `trendIgnition${isLong ? "Long" : "Short"}`,
 		side,
@@ -917,11 +922,17 @@ const detectMeanReversion = (
 		side === "short"
 			? levels.dayHigh ?? levels.rangeHigh
 			: levels.dayLow ?? levels.rangeLow;
+
+	// Use the same scale as vwapStretchPct instead of a fixed 0.1% band.
+	const proximity = config.thresholds.vwapStretchPct; // e.g. 0.0035 = 0.35%
+
 	const nearExtreme =
 		anchor !== null
 			? side === "short"
-				? latest.high >= anchor * 0.999
-				: latest.low <= anchor * 1.001
+				? // high is within (1 - proximity) * anchor ⇒ within ~0.35% of the extreme
+				  latest.high >= anchor * (1 - proximity)
+				: // low is within (1 + proximity) * anchor ⇒ within ~0.35% of the extreme
+				  latest.low <= anchor * (1 + proximity)
 			: false;
 	const rsi = indicator.rsi;
 	const rsiCondition =
@@ -937,7 +948,8 @@ const detectMeanReversion = (
 			atr * config.thresholds.meanRevStretchAtr;
 	const divergence =
 		indicator.cvdDivergence === (side === "short" ? "bearish" : "bullish");
-	const active =
+	const debugMode = isUltraDebugMode();
+	const strictActive =
 		trendFilterOk &&
 		overExtended &&
 		anchor !== null &&
@@ -945,6 +957,9 @@ const detectMeanReversion = (
 		rsiCondition &&
 		impulse &&
 		divergence;
+	const relaxedActive = trendFilterOk && overExtended && rsiCondition;
+	// Strict mode enforces the full conjunction; debug mode relaxes to aid tuning.
+	const active = debugMode ? relaxedActive : strictActive;
 	return {
 		name: `meanReversion${side === "long" ? "Long" : "Short"}`,
 		side,
@@ -977,9 +992,11 @@ const detectBreakoutTrap = (
 	const keyLevel = isLong
 		? levels.rangeLow ?? levels.previousDayLow ?? levels.dayLow
 		: levels.rangeHigh ?? levels.previousDayHigh ?? levels.dayHigh;
+	const proximity = config.thresholds.vwapStretchPct;
+
 	const overshoot = isLong
-		? keyLevel !== null && latest.low < keyLevel * 0.999
-		: keyLevel !== null && latest.high > keyLevel * 1.001;
+		? keyLevel !== null && latest.low < keyLevel * (1 - proximity)
+		: keyLevel !== null && latest.high > keyLevel * (1 + proximity);
 	const reEntry = isLong
 		? keyLevel !== null && latest.close > keyLevel
 		: keyLevel !== null && latest.close < keyLevel;
@@ -990,13 +1007,18 @@ const detectBreakoutTrap = (
 	const orderFlowReject = isLong
 		? indicator.cvdDivergence === "bullish" || indicator.cvdTrend === "up"
 		: indicator.cvdDivergence === "bearish" || indicator.cvdTrend === "down";
-	const active =
+	const debugMode = isUltraDebugMode();
+	const strictActive =
 		rangeContext &&
 		keyLevel !== null &&
 		overshoot &&
 		reEntry &&
 		volumeControlled &&
 		orderFlowReject;
+	const relaxedActive =
+		rangeContext && keyLevel !== null && overshoot && reEntry;
+	// Strict mode requires full confirmation; debug mode focuses on structure only.
+	const active = debugMode ? relaxedActive : strictActive;
 	return {
 		name: `breakoutTrap${isLong ? "Long" : "Short"}`,
 		side,
@@ -1041,8 +1063,12 @@ const detectLiquiditySweep = (
 		: false;
 	const divergence =
 		indicator.cvdDivergence === (isLong ? "bullish" : "bearish");
-	const active =
+	const debugMode = isUltraDebugMode();
+	const strictActive =
 		referenceLevel !== null && wickLarge && reclaimed && divergence;
+	const relaxedActive = referenceLevel !== null && wickLarge && reclaimed;
+	// Strict mode demands divergence confirmation; debug mode only checks structure.
+	const active = debugMode ? relaxedActive : strictActive;
 	return {
 		name: `liquiditySweep${isLong ? "Long" : "Short"}`,
 		side,
