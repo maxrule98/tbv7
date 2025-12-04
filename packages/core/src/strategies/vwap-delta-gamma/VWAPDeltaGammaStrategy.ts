@@ -192,9 +192,51 @@ interface StrategySetupChecks {
 	breakoutShort: BreakoutShortChecks;
 }
 
+interface StrategySetups {
+	trendLong: boolean;
+	trendShort: boolean;
+	meanRevLong: boolean;
+	meanRevShort: boolean;
+	breakoutLong: boolean;
+	breakoutShort: boolean;
+}
+
+interface LongExitSignals {
+	trendVwap50Break: boolean;
+	trendGamma50FlipDown: boolean;
+	trendDailyDeltaWeakening: boolean;
+	breakoutCompleted: boolean;
+}
+
+interface ShortExitSignals {
+	trendVwap50Break: boolean;
+	trendGamma50FlipUp: boolean;
+	trendDailyDeltaStrengthening: boolean;
+	breakoutCompleted: boolean;
+}
+
+interface StrategyExitSignals {
+	long: LongExitSignals;
+	short: ShortExitSignals;
+}
+
+interface StrategyContextSnapshot {
+	latest: Candle;
+	position: PositionSide;
+	bias: BiasSummary;
+	regime: {
+		trend: StrategyFlags["trendRegime"];
+		volatility: StrategyFlags["volatilityRegime"];
+	};
+	setupChecks: StrategySetupChecks;
+	setups: StrategySetups;
+	exits: StrategyExitSignals;
+}
+
 interface StrategyEvaluation {
 	flags: StrategyFlags;
 	setupChecks: StrategySetupChecks;
+	exits: StrategyExitSignals;
 }
 
 interface SetupEvaluation<TChecks> {
@@ -271,6 +313,23 @@ export class VWAPDeltaGammaStrategy {
 			vwapContext,
 			atrContext
 		);
+		const setups = this.computeSetups({
+			setupChecks: evaluation.setupChecks,
+			bias: mtfBias,
+			trendRegime: evaluation.flags.trendRegime,
+		});
+		const ctx: StrategyContextSnapshot = {
+			latest,
+			position,
+			bias: mtfBias,
+			regime: {
+				trend: evaluation.flags.trendRegime,
+				volatility: evaluation.flags.volatilityRegime,
+			},
+			setupChecks: evaluation.setupChecks,
+			setups,
+			exits: evaluation.exits,
+		};
 
 		this.logContext(latest, {
 			vwapContext,
@@ -279,53 +338,13 @@ export class VWAPDeltaGammaStrategy {
 			macdForecast,
 			flags: evaluation.flags,
 			setupChecks: evaluation.setupChecks,
+			setups,
 		});
+		this.logSetups(latest, setups);
 
-		if (position === "LONG" && evaluation.flags.longExitReason) {
-			return this.tradeIntent(
-				latest,
-				"CLOSE_LONG",
-				evaluation.flags.longExitReason,
-				recommendations
-			);
-		}
-		if (position === "SHORT" && evaluation.flags.shortExitReason) {
-			return this.tradeIntent(
-				latest,
-				"CLOSE_SHORT",
-				evaluation.flags.shortExitReason,
-				recommendations
-			);
-		}
-		if (position === "FLAT") {
-			if (
-				evaluation.flags.trendLong ||
-				evaluation.flags.meanRevLong ||
-				evaluation.flags.breakoutLong
-			) {
-				const reason = evaluation.flags.trendLong
-					? "trend_continuation_long"
-					: evaluation.flags.breakoutLong
-					? "compression_breakout_long"
-					: "mean_reversion_long";
-				return this.tradeIntent(latest, "OPEN_LONG", reason, recommendations);
-			}
-
-			if (
-				evaluation.flags.trendShort ||
-				evaluation.flags.meanRevShort ||
-				evaluation.flags.breakoutShort
-			) {
-				const reason = evaluation.flags.trendShort
-					? "trend_continuation_short"
-					: evaluation.flags.breakoutShort
-					? "compression_breakout_short"
-					: "mean_reversion_short";
-				return this.tradeIntent(latest, "OPEN_SHORT", reason, recommendations);
-			}
-		}
-
-		return this.noAction(executionCandles, "no_signal");
+		const intent = this.decideFromContext(ctx, recommendations);
+		this.logDecision(latest, intent, ctx);
+		return intent;
 	}
 
 	private buildVwapContext(
@@ -769,18 +788,20 @@ export class VWAPDeltaGammaStrategy {
 
 		const deltaWeakening = this.isDeltaWeakening(deltaHistory, "long");
 		const deltaStrengthening = this.isDeltaWeakening(deltaHistory, "short");
-		const longExitReason = this.pickLongExitReason(
+		const longExitSignals = this.computeLongExitSignals(
 			vwap,
 			atr,
 			price,
 			deltaWeakening
 		);
-		const shortExitReason = this.pickShortExitReason(
+		const shortExitSignals = this.computeShortExitSignals(
 			vwap,
 			atr,
 			price,
 			deltaStrengthening
 		);
+		const longExitReason = this.pickLongExitReason(longExitSignals);
+		const shortExitReason = this.pickShortExitReason(shortExitSignals);
 		const trendRegime: StrategyFlags["trendRegime"] = priceAboveAll
 			? "bull_trend"
 			: priceBelowAll
@@ -813,8 +834,12 @@ export class VWAPDeltaGammaStrategy {
 			breakoutLong: breakoutLongEvaluation.checks,
 			breakoutShort: breakoutShortEvaluation.checks,
 		};
+		const exits: StrategyExitSignals = {
+			long: longExitSignals,
+			short: shortExitSignals,
+		};
 
-		return { flags, setupChecks };
+		return { flags, setupChecks, exits };
 	}
 
 	private evaluateTrendLong(params: {
@@ -1085,57 +1110,256 @@ export class VWAPDeltaGammaStrategy {
 		return a < b && b < c;
 	}
 
-	private pickLongExitReason(
+	private decideFromContext(
+		ctx: StrategyContextSnapshot,
+		recommendations: StrategyRecommendations
+	): TradeIntent {
+		const { latest, position, setups, exits } = ctx;
+		if (position === "FLAT") {
+			const longReason = this.pickLongEntryReason(setups);
+			if (longReason) {
+				return this.tradeIntent(
+					latest,
+					"OPEN_LONG",
+					longReason,
+					recommendations
+				);
+			}
+			const shortReason = this.pickShortEntryReason(setups);
+			if (shortReason) {
+				return this.tradeIntent(
+					latest,
+					"OPEN_SHORT",
+					shortReason,
+					recommendations
+				);
+			}
+			return this.noAction([latest], "no_signal");
+		}
+		if (position === "LONG") {
+			const exitReason = this.pickLongExitReason(exits.long);
+			if (exitReason) {
+				return this.tradeIntent(
+					latest,
+					"CLOSE_LONG",
+					exitReason,
+					recommendations
+				);
+			}
+			return this.noAction([latest], "hold_long");
+		}
+		if (position === "SHORT") {
+			const exitReason = this.pickShortExitReason(exits.short);
+			if (exitReason) {
+				return this.tradeIntent(
+					latest,
+					"CLOSE_SHORT",
+					exitReason,
+					recommendations
+				);
+			}
+			return this.noAction([latest], "hold_short");
+		}
+		return this.noAction([latest], "unknown_position_state");
+	}
+
+	private pickLongEntryReason(setups: StrategySetups): string | null {
+		if (setups.trendLong) {
+			return "trend_long";
+		}
+		if (setups.breakoutLong) {
+			return "breakout_long";
+		}
+		if (setups.meanRevLong) {
+			return "mean_reversion_long";
+		}
+		return null;
+	}
+
+	private pickShortEntryReason(setups: StrategySetups): string | null {
+		if (setups.trendShort) {
+			return "trend_short";
+		}
+		if (setups.breakoutShort) {
+			return "breakout_short";
+		}
+		if (setups.meanRevShort) {
+			return "mean_reversion_short";
+		}
+		return null;
+	}
+
+	private computeSetups(params: {
+		setupChecks: StrategySetupChecks;
+		bias: BiasSummary;
+		trendRegime: StrategyFlags["trendRegime"];
+	}): StrategySetups {
+		const { setupChecks: s, bias, trendRegime } = params;
+		const trendLong =
+			trendRegime === "bull_trend" &&
+			bias.trend === "bull" &&
+			s.trendLong.priceAboveAllVwaps &&
+			s.trendLong.delta200Positive &&
+			s.trendLong.gamma200Positive &&
+			s.trendLong.pullbackToVwap50 &&
+			s.trendLong.delta50Reclaimed &&
+			s.trendLong.gamma50Positive &&
+			s.trendLong.macdBullish &&
+			s.trendLong.trendDeltaPositive &&
+			s.trendLong.mtfTrendBullish &&
+			s.trendLong.macroFilterOk &&
+			s.trendLong.atrTrendOk &&
+			s.trendLong.positionFlat;
+		const trendShort =
+			trendRegime === "bear_trend" &&
+			bias.trend === "bear" &&
+			s.trendShort.priceBelowAllVwaps &&
+			s.trendShort.delta200Negative &&
+			s.trendShort.gamma200Negative &&
+			s.trendShort.pullbackToVwap50 &&
+			s.trendShort.delta50Rejected &&
+			s.trendShort.gamma50Negative &&
+			s.trendShort.macdBearish &&
+			s.trendShort.trendDeltaNegative &&
+			s.trendShort.mtfTrendBearish &&
+			s.trendShort.macroFilterOk &&
+			s.trendShort.atrTrendOk &&
+			s.trendShort.positionFlat;
+		const meanRevLong =
+			s.meanRevLong.priceBelowDailyExtreme &&
+			s.meanRevLong.deltaDailyExtremeNegative &&
+			s.meanRevLong.gammaDailyPositiveFlip &&
+			s.meanRevLong.macdBullish &&
+			s.meanRevLong.atrReferenceAvailable;
+		const meanRevShort =
+			s.meanRevShort.priceAboveDailyExtreme &&
+			s.meanRevShort.deltaDailyExtremePositive &&
+			s.meanRevShort.gammaDailyNegativeFlip &&
+			s.meanRevShort.macdBearish &&
+			s.meanRevShort.atrReferenceAvailable;
+		const breakoutLong =
+			s.breakoutLong.betweenDailyWeekly &&
+			s.breakoutLong.atrCompression &&
+			s.breakoutLong.deltaCalm &&
+			s.breakoutLong.gammaCalm &&
+			s.breakoutLong.prevBelowDaily &&
+			s.breakoutLong.reclaimDailyClose &&
+			s.breakoutLong.deltaPositive &&
+			s.breakoutLong.gammaPositive &&
+			s.breakoutLong.atrExpansion;
+		const breakoutShort =
+			s.breakoutShort.betweenDailyWeekly &&
+			s.breakoutShort.atrCompression &&
+			s.breakoutShort.deltaCalm &&
+			s.breakoutShort.gammaCalm &&
+			s.breakoutShort.prevAboveDaily &&
+			s.breakoutShort.rejectDailyClose &&
+			s.breakoutShort.deltaNegative &&
+			s.breakoutShort.gammaNegative &&
+			s.breakoutShort.atrExpansion;
+		return {
+			trendLong,
+			trendShort,
+			meanRevLong,
+			meanRevShort,
+			breakoutLong,
+			breakoutShort,
+		};
+	}
+
+	private logSetups(latest: Candle, setups: StrategySetups): void {
+		if (!Object.values(setups).some(Boolean)) {
+			return;
+		}
+		strategyLogger.info("setups_eval", {
+			strategy: "VWAPDeltaGamma",
+			symbol: latest.symbol,
+			timeframe: latest.timeframe,
+			timestamp: new Date(latest.timestamp).toISOString(),
+			setups,
+		});
+	}
+
+	private logDecision(
+		latest: Candle,
+		intent: TradeIntent,
+		ctx: StrategyContextSnapshot
+	): void {
+		strategyLogger.info("setups_decision", {
+			strategy: "VWAPDeltaGamma",
+			symbol: latest.symbol,
+			timeframe: latest.timeframe,
+			timestamp: new Date(latest.timestamp).toISOString(),
+			position: ctx.position,
+			intent: intent.intent,
+			reason: intent.reason,
+			setups: ctx.setups,
+		});
+	}
+
+	private computeLongExitSignals(
 		vwap: VwapContext,
 		atr: AtrContext,
 		price: number,
 		deltaWeakening: boolean
-	): string | null {
-		if (vwap.rolling50.value !== null && price < vwap.rolling50.value) {
+	): LongExitSignals {
+		return {
+			trendVwap50Break:
+				vwap.rolling50.value !== null && price < vwap.rolling50.value,
+			trendGamma50FlipDown:
+				vwap.rolling50.delta.gammaSign === "negative" &&
+				vwap.rolling50.delta.gammaFlipped,
+			trendDailyDeltaWeakening: deltaWeakening,
+			breakoutCompleted:
+				vwap.daily.value !== null && price >= vwap.daily.value && atr.collapsed,
+		};
+	}
+
+	private computeShortExitSignals(
+		vwap: VwapContext,
+		atr: AtrContext,
+		price: number,
+		deltaStrengthening: boolean
+	): ShortExitSignals {
+		return {
+			trendVwap50Break:
+				vwap.rolling50.value !== null && price > vwap.rolling50.value,
+			trendGamma50FlipUp:
+				vwap.rolling50.delta.gammaSign === "positive" &&
+				vwap.rolling50.delta.gammaFlipped,
+			trendDailyDeltaStrengthening: deltaStrengthening,
+			breakoutCompleted:
+				vwap.daily.value !== null && price <= vwap.daily.value && atr.collapsed,
+		};
+	}
+
+	private pickLongExitReason(signals: LongExitSignals): string | null {
+		if (signals.trendVwap50Break) {
 			return "trend_vwap50_break";
 		}
-		if (
-			vwap.rolling50.delta.gammaSign === "negative" &&
-			vwap.rolling50.delta.gammaFlipped
-		) {
+		if (signals.trendGamma50FlipDown) {
 			return "trend_gamma50_flip_down";
 		}
-		if (deltaWeakening) {
+		if (signals.trendDailyDeltaWeakening) {
 			return "trend_daily_delta_weakening";
 		}
-		if (
-			vwap.daily.value !== null &&
-			price >= vwap.daily.value &&
-			atr.collapsed
-		) {
+		if (signals.breakoutCompleted) {
 			return "breakout_completed";
 		}
 		return null;
 	}
 
-	private pickShortExitReason(
-		vwap: VwapContext,
-		atr: AtrContext,
-		price: number,
-		deltaStrengthening: boolean
-	): string | null {
-		if (vwap.rolling50.value !== null && price > vwap.rolling50.value) {
+	private pickShortExitReason(signals: ShortExitSignals): string | null {
+		if (signals.trendVwap50Break) {
 			return "trend_vwap50_break";
 		}
-		if (
-			vwap.rolling50.delta.gammaSign === "positive" &&
-			vwap.rolling50.delta.gammaFlipped
-		) {
+		if (signals.trendGamma50FlipUp) {
 			return "trend_gamma50_flip_up";
 		}
-		if (deltaStrengthening) {
+		if (signals.trendDailyDeltaStrengthening) {
 			return "trend_daily_delta_strengthening";
 		}
-		if (
-			vwap.daily.value !== null &&
-			price <= vwap.daily.value &&
-			atr.collapsed
-		) {
+		if (signals.breakoutCompleted) {
 			return "breakout_completed";
 		}
 		return null;
@@ -1275,6 +1499,7 @@ export class VWAPDeltaGammaStrategy {
 			macdForecast: number | null;
 			flags: StrategyFlags;
 			setupChecks: StrategySetupChecks;
+			setups: StrategySetups;
 		}
 	): void {
 		strategyLogger.info("strategy_context", {
@@ -1310,14 +1535,7 @@ export class VWAPDeltaGammaStrategy {
 			},
 			macdForecast: payload.macdForecast,
 			setupChecks: payload.setupChecks,
-			setups: {
-				trendLong: payload.flags.trendLong,
-				trendShort: payload.flags.trendShort,
-				meanRevLong: payload.flags.meanRevLong,
-				meanRevShort: payload.flags.meanRevShort,
-				breakoutLong: payload.flags.breakoutLong,
-				breakoutShort: payload.flags.breakoutShort,
-			},
+			setups: payload.setups,
 			exits: {
 				long: payload.flags.longExitReason,
 				short: payload.flags.shortExitReason,
