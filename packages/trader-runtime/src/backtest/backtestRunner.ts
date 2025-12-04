@@ -12,6 +12,7 @@ import {
 	VWAPDeltaGammaStrategy,
 	loadAccountConfig,
 	loadAgenaiConfig,
+	loadStrategyConfig,
 } from "@agenai/core";
 import { MexcClient } from "@agenai/exchange-mexc";
 import {
@@ -67,6 +68,25 @@ interface TimeframeSeries {
 
 type WarmupMap = Map<string, number>;
 
+const DEFAULT_STRATEGY_PROFILES: Record<StrategyId, string> = {
+	vwap_delta_gamma: "vwap-delta-gamma",
+	ultra_aggressive_btc_usdt: "ultra-aggressive-btc-usdt",
+};
+
+const resolveStrategyProfileName = (
+	strategyId: StrategyId,
+	overrideProfile?: string
+): string => {
+	if (overrideProfile) {
+		return overrideProfile;
+	}
+	const profile = DEFAULT_STRATEGY_PROFILES[strategyId];
+	if (!profile) {
+		throw new Error(`No default strategy profile mapped for ${strategyId}`);
+	}
+	return profile;
+};
+
 export const runBacktest = async (
 	backtestConfig: BacktestConfig,
 	options: RunBacktestOptions = {}
@@ -90,6 +110,33 @@ export const runBacktest = async (
 			requestedStrategy: backtestConfig.strategyId,
 			loadedStrategy: agenaiConfig.strategy.id,
 		});
+		const fallbackProfile = resolveStrategyProfileName(
+			backtestConfig.strategyId,
+			options.strategyProfile
+		);
+		try {
+			const reloadedStrategy = loadStrategyConfig(
+				options.configDir,
+				fallbackProfile
+			);
+			if (reloadedStrategy.id !== backtestConfig.strategyId) {
+				throw new Error(
+					`profile ${fallbackProfile} resolved to ${reloadedStrategy.id}`
+				);
+			}
+			agenaiConfig.strategy = reloadedStrategy;
+			runtimeLogger.info("backtest_strategy_config_reloaded", {
+				requestedStrategy: backtestConfig.strategyId,
+				reloadedProfile: fallbackProfile,
+				configDir: options.configDir ?? null,
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "unknown_error";
+			throw new Error(
+				`Failed to load config for strategy ${backtestConfig.strategyId}. ` +
+					`Provide a matching --strategyProfile or ensure config exists. (${message})`
+			);
+		}
 	}
 
 	const accountConfig =
