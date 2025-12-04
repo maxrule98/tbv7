@@ -16,6 +16,8 @@ import { Candle, PositionSide, TradeIntent } from "../../types";
 import { createLogger } from "../../utils/logger";
 
 const strategyLogger = createLogger("ultra-agg-btc-usdt");
+const isUltraDiagnosticsEnabled = (): boolean =>
+	process.env.ULTRA_DIAGNOSTICS === "1";
 
 export type TrendDirection = "TrendingUp" | "TrendingDown" | "Ranging";
 export type VolatilityRegime = "low" | "balanced" | "high";
@@ -110,6 +112,7 @@ interface StrategyContextSnapshot {
 	indicator: IndicatorSnapshot;
 	levels: LevelSnapshot;
 	setups: StrategySetups;
+	setupDiagnostics: SetupDiagnosticsEntry[];
 }
 
 type StrategySetups = Record<
@@ -123,6 +126,18 @@ type StrategySetups = Record<
 	| "liquiditySweepShort",
 	boolean
 >;
+
+interface SetupDiagnosticsEntry {
+	name: string;
+	side: "long" | "short";
+	active: boolean;
+	checks: Record<string, boolean | number | string | null>;
+}
+
+interface SetupEvaluationResult {
+	setups: StrategySetups;
+	diagnostics: SetupDiagnosticsEntry[];
+}
 
 interface SetupDecision {
 	intent: TradeIntent["intent"];
@@ -169,6 +184,7 @@ export class UltraAggressiveBtcUsdtStrategy {
 		);
 
 		this.logContext(ctx);
+		this.logDiagnostics(ctx);
 
 		const latest = executionCandles[executionCandles.length - 1];
 		if (position !== this.positionMemory?.side) {
@@ -229,7 +245,7 @@ export class UltraAggressiveBtcUsdtStrategy {
 			indicator.atr1m,
 			this.config
 		);
-		const setups = this.evaluateSetups(
+		const { setups, diagnostics } = this.evaluateSetups(
 			trendDirection,
 			volRegime,
 			indicator,
@@ -246,6 +262,7 @@ export class UltraAggressiveBtcUsdtStrategy {
 			indicator,
 			levels,
 			setups,
+			setupDiagnostics: diagnostics,
 		};
 	}
 
@@ -324,6 +341,7 @@ export class UltraAggressiveBtcUsdtStrategy {
 			-this.config.lookbacks.rangeDetection * 2
 		);
 		const combinedRange = executionRange.length ? executionRange : contextRange;
+
 		return {
 			dayHigh: sameDay.length ? Math.max(...sameDay.map((c) => c.high)) : null,
 			dayLow: sameDay.length ? Math.min(...sameDay.map((c) => c.low)) : null,
@@ -350,73 +368,93 @@ export class UltraAggressiveBtcUsdtStrategy {
 		indicator: IndicatorSnapshot,
 		levels: LevelSnapshot,
 		latest: Candle
-	): StrategySetups {
-		return {
-			trendIgnitionLong: detectTrendIgnition(
-				"long",
-				trendDirection,
-				volRegime,
-				indicator,
-				levels,
-				latest,
-				this.config
-			),
-			trendIgnitionShort: detectTrendIgnition(
-				"short",
-				trendDirection,
-				volRegime,
-				indicator,
-				levels,
-				latest,
-				this.config
-			),
-			meanReversionLong: detectMeanReversion(
-				"long",
-				trendDirection,
-				indicator,
-				levels,
-				latest,
-				this.config
-			),
-			meanReversionShort: detectMeanReversion(
-				"short",
-				trendDirection,
-				indicator,
-				levels,
-				latest,
-				this.config
-			),
-			breakoutTrapLong: detectBreakoutTrap(
-				"long",
-				trendDirection,
-				indicator,
-				levels,
-				latest,
-				this.config
-			),
-			breakoutTrapShort: detectBreakoutTrap(
-				"short",
-				trendDirection,
-				indicator,
-				levels,
-				latest,
-				this.config
-			),
-			liquiditySweepLong: detectLiquiditySweep(
-				"long",
-				indicator,
-				levels,
-				latest,
-				this.config
-			),
-			liquiditySweepShort: detectLiquiditySweep(
-				"short",
-				indicator,
-				levels,
-				latest,
-				this.config
-			),
+	): SetupEvaluationResult {
+		const diagEntries: SetupDiagnosticsEntry[] = [];
+		const trendIgnitionLongEval = detectTrendIgnition(
+			"long",
+			trendDirection,
+			volRegime,
+			indicator,
+			levels,
+			latest,
+			this.config
+		);
+		diagEntries.push(trendIgnitionLongEval);
+		const trendIgnitionShortEval = detectTrendIgnition(
+			"short",
+			trendDirection,
+			volRegime,
+			indicator,
+			levels,
+			latest,
+			this.config
+		);
+		diagEntries.push(trendIgnitionShortEval);
+		const meanRevLongEval = detectMeanReversion(
+			"long",
+			trendDirection,
+			indicator,
+			levels,
+			latest,
+			this.config
+		);
+		diagEntries.push(meanRevLongEval);
+		const meanRevShortEval = detectMeanReversion(
+			"short",
+			trendDirection,
+			indicator,
+			levels,
+			latest,
+			this.config
+		);
+		diagEntries.push(meanRevShortEval);
+		const breakoutTrapLongEval = detectBreakoutTrap(
+			"long",
+			trendDirection,
+			indicator,
+			levels,
+			latest,
+			this.config
+		);
+		diagEntries.push(breakoutTrapLongEval);
+		const breakoutTrapShortEval = detectBreakoutTrap(
+			"short",
+			trendDirection,
+			indicator,
+			levels,
+			latest,
+			this.config
+		);
+		diagEntries.push(breakoutTrapShortEval);
+		const liquidityLongEval = detectLiquiditySweep(
+			"long",
+			indicator,
+			levels,
+			latest,
+			this.config
+		);
+		diagEntries.push(liquidityLongEval);
+		const liquidityShortEval = detectLiquiditySweep(
+			"short",
+			indicator,
+			levels,
+			latest,
+			this.config
+		);
+		diagEntries.push(liquidityShortEval);
+
+		const setups: StrategySetups = {
+			trendIgnitionLong: trendIgnitionLongEval.active,
+			trendIgnitionShort: trendIgnitionShortEval.active,
+			meanReversionLong: meanRevLongEval.active,
+			meanReversionShort: meanRevShortEval.active,
+			breakoutTrapLong: breakoutTrapLongEval.active,
+			breakoutTrapShort: breakoutTrapShortEval.active,
+			liquiditySweepLong: liquidityLongEval.active,
+			liquiditySweepShort: liquidityShortEval.active,
 		};
+
+		return { setups, diagnostics: diagEntries };
 	}
 
 	private findEntryDecision(
@@ -598,6 +636,39 @@ export class UltraAggressiveBtcUsdtStrategy {
 		});
 	}
 
+	private logDiagnostics(ctx: StrategyContextSnapshot): void {
+		if (!isUltraDiagnosticsEnabled()) {
+			return;
+		}
+		strategyLogger.info("ultra_diagnostics", {
+			strategy: "UltraAggressiveBtcUsdt",
+			symbol: ctx.symbol,
+			timeframe: ctx.timeframe,
+			timestamp: new Date(ctx.timestamp).toISOString(),
+			price: ctx.price,
+			trend: ctx.trendDirection,
+			volatility: ctx.volRegime,
+			indicator: {
+				vwapDeviationPct: ctx.indicator.vwapDeviationPct,
+				rsi: ctx.indicator.rsi,
+				atr1m: ctx.indicator.atr1m,
+				atr5m: ctx.indicator.atr5m,
+				cvdTrend: ctx.indicator.cvdTrend,
+				cvdDivergence: ctx.indicator.cvdDivergence,
+			},
+			levels: {
+				rangeHigh: ctx.levels.rangeHigh,
+				rangeLow: ctx.levels.rangeLow,
+				dayHigh: ctx.levels.dayHigh,
+				dayLow: ctx.levels.dayLow,
+				recentSwingHigh: ctx.levels.recentSwingHigh,
+				recentSwingLow: ctx.levels.recentSwingLow,
+			},
+			setups: ctx.setups,
+			checks: ctx.setupDiagnostics,
+		});
+	}
+
 	private logSignal(
 		ctx: StrategyContextSnapshot,
 		decision: SetupDecision
@@ -769,31 +840,21 @@ const detectTrendIgnition = (
 	levels: LevelSnapshot,
 	latest: Candle,
 	config: UltraAggressiveBtcUsdtConfig
-): boolean => {
+): SetupDiagnosticsEntry => {
 	const isLong = side === "long";
 	const trending = isLong
 		? trendDirection === "TrendingUp"
 		: trendDirection === "TrendingDown";
-	if (!trending || volRegime === "low") {
-		return false;
-	}
-	if (!indicator.vwap) {
-		return false;
-	}
+	const volOk = volRegime !== "low";
+	const hasVwap = indicator.vwap !== null;
 	const priceVsVwap = indicator.vwapDeviationPct ?? 0;
-	if (isLong && priceVsVwap < 0) {
-		return false;
-	}
-	if (!isLong && priceVsVwap > 0) {
-		return false;
-	}
+	const priceAlignment = isLong ? priceVsVwap >= 0 : priceVsVwap <= 0;
 	const breakoutRef = isLong ? levels.rangeHigh : levels.rangeLow;
-	if (!breakoutRef) {
-		return false;
-	}
-	const breakout = isLong
-		? latest.close > breakoutRef * 1.001
-		: latest.close < breakoutRef * 0.999;
+	const breakout = !!breakoutRef
+		? isLong
+			? latest.close > breakoutRef * 1.001
+			: latest.close < breakoutRef * 0.999
+		: false;
 	const body = Math.abs(latest.close - latest.open);
 	const atr = indicator.atr1m ?? 0;
 	const wideBody =
@@ -806,7 +867,33 @@ const detectTrendIgnition = (
 	const cvdOk =
 		indicator.cvdTrend === (isLong ? "up" : "down") &&
 		indicator.cvdDivergence !== (isLong ? "bearish" : "bullish");
-	return breakout && wideBody && highVolume && cvdOk;
+	const active =
+		trending &&
+		volOk &&
+		hasVwap &&
+		priceAlignment &&
+		!!breakoutRef &&
+		breakout &&
+		wideBody &&
+		highVolume &&
+		cvdOk;
+	return {
+		name: `trendIgnition${isLong ? "Long" : "Short"}`,
+		side,
+		active,
+		checks: {
+			trending,
+			volOk,
+			hasVwap,
+			priceVsVwap,
+			priceAlignment,
+			breakoutRef: breakoutRef ?? null,
+			breakout,
+			wideBody,
+			highVolume,
+			cvdOk,
+		},
+	};
 };
 
 const detectMeanReversion = (
@@ -816,52 +903,65 @@ const detectMeanReversion = (
 	levels: LevelSnapshot,
 	latest: Candle,
 	config: UltraAggressiveBtcUsdtConfig
-): boolean => {
-	if (trendDirection === "TrendingUp" && side === "short") {
-		return false;
-	}
-	if (trendDirection === "TrendingDown" && side === "long") {
-		return false;
-	}
+): SetupDiagnosticsEntry => {
+	const trendFilterOk = !(
+		(trendDirection === "TrendingUp" && side === "short") ||
+		(trendDirection === "TrendingDown" && side === "long")
+	);
 	const stretchPct = indicator.vwapDeviationPct ?? 0;
 	const overExtended =
 		side === "short"
 			? stretchPct > config.thresholds.vwapStretchPct
 			: stretchPct < -config.thresholds.vwapStretchPct;
-	if (!overExtended) {
-		return false;
-	}
 	const anchor =
 		side === "short"
 			? levels.dayHigh ?? levels.rangeHigh
 			: levels.dayLow ?? levels.rangeLow;
-	if (!anchor) {
-		return false;
-	}
 	const nearExtreme =
-		side === "short"
-			? latest.high >= anchor * 0.999
-			: latest.low <= anchor * 1.001;
-	if (!nearExtreme) {
-		return false;
-	}
-	if (!indicator.rsi) {
-		return false;
-	}
+		anchor !== null
+			? side === "short"
+				? latest.high >= anchor * 0.999
+				: latest.low <= anchor * 1.001
+			: false;
+	const rsi = indicator.rsi;
 	const rsiCondition =
-		side === "short"
-			? indicator.rsi >= config.thresholds.rsiOverbought
-			: indicator.rsi <= config.thresholds.rsiOversold;
-	if (!rsiCondition) {
-		return false;
-	}
+		rsi !== null
+			? side === "short"
+				? rsi >= config.thresholds.rsiOverbought
+				: rsi <= config.thresholds.rsiOversold
+			: false;
 	const atr = indicator.atr1m ?? 0;
 	const impulse =
+		atr > 0 &&
 		Math.abs(latest.close - latest.open) >=
-		atr * config.thresholds.meanRevStretchAtr;
+			atr * config.thresholds.meanRevStretchAtr;
 	const divergence =
 		indicator.cvdDivergence === (side === "short" ? "bearish" : "bullish");
-	return impulse && divergence;
+	const active =
+		trendFilterOk &&
+		overExtended &&
+		anchor !== null &&
+		nearExtreme &&
+		rsiCondition &&
+		impulse &&
+		divergence;
+	return {
+		name: `meanReversion${side === "long" ? "Long" : "Short"}`,
+		side,
+		active,
+		checks: {
+			trendFilterOk,
+			stretchPct,
+			overExtended,
+			anchor: anchor ?? null,
+			nearExtreme,
+			rsi,
+			rsiCondition,
+			atr,
+			impulse,
+			divergence,
+		},
+	};
 };
 
 const detectBreakoutTrap = (
@@ -871,22 +971,18 @@ const detectBreakoutTrap = (
 	levels: LevelSnapshot,
 	latest: Candle,
 	config: UltraAggressiveBtcUsdtConfig
-): boolean => {
+): SetupDiagnosticsEntry => {
 	const isLong = side === "long";
 	const rangeContext = trendDirection === "Ranging";
 	const keyLevel = isLong
 		? levels.rangeLow ?? levels.previousDayLow ?? levels.dayLow
 		: levels.rangeHigh ?? levels.previousDayHigh ?? levels.dayHigh;
-	if (!keyLevel || !rangeContext) {
-		return false;
-	}
 	const overshoot = isLong
-		? latest.low < keyLevel * 0.999
-		: latest.high > keyLevel * 1.001;
-	const reEntry = isLong ? latest.close > keyLevel : latest.close < keyLevel;
-	if (!overshoot || !reEntry) {
-		return false;
-	}
+		? keyLevel !== null && latest.low < keyLevel * 0.999
+		: keyLevel !== null && latest.high > keyLevel * 1.001;
+	const reEntry = isLong
+		? keyLevel !== null && latest.close > keyLevel
+		: keyLevel !== null && latest.close < keyLevel;
 	const volumeControlled =
 		indicator.volumeAvgShort > 0 &&
 		latest.volume <=
@@ -894,7 +990,26 @@ const detectBreakoutTrap = (
 	const orderFlowReject = isLong
 		? indicator.cvdDivergence === "bullish" || indicator.cvdTrend === "up"
 		: indicator.cvdDivergence === "bearish" || indicator.cvdTrend === "down";
-	return volumeControlled && orderFlowReject;
+	const active =
+		rangeContext &&
+		keyLevel !== null &&
+		overshoot &&
+		reEntry &&
+		volumeControlled &&
+		orderFlowReject;
+	return {
+		name: `breakoutTrap${isLong ? "Long" : "Short"}`,
+		side,
+		active,
+		checks: {
+			rangeContext,
+			keyLevel: keyLevel ?? null,
+			overshoot,
+			reEntry,
+			volumeControlled,
+			orderFlowReject,
+		},
+	};
 };
 
 const detectLiquiditySweep = (
@@ -903,27 +1018,44 @@ const detectLiquiditySweep = (
 	levels: LevelSnapshot,
 	latest: Candle,
 	config: UltraAggressiveBtcUsdtConfig
-): boolean => {
+): SetupDiagnosticsEntry => {
 	const isLong = side === "long";
 	const referenceLevel = isLong
 		? levels.recentSwingLow ?? levels.dayLow ?? levels.previousDayLow
 		: levels.recentSwingHigh ?? levels.dayHigh ?? levels.previousDayHigh;
-	if (!referenceLevel) {
-		return false;
-	}
 	const atr = indicator.atr1m ?? 0;
-	const wickSize = isLong
-		? referenceLevel - latest.low
-		: latest.high - referenceLevel;
-	const wickLarge = atr
-		? wickSize >= atr * config.thresholds.liquiditySweepWickMultiple
-		: wickSize / referenceLevel >= config.thresholds.vwapStretchPct;
-	const reclaimed = isLong
-		? latest.close > referenceLevel
-		: latest.close < referenceLevel;
+	const wickSize = referenceLevel
+		? isLong
+			? referenceLevel - latest.low
+			: latest.high - referenceLevel
+		: 0;
+	const wickLarge = referenceLevel
+		? atr
+			? wickSize >= atr * config.thresholds.liquiditySweepWickMultiple
+			: wickSize / referenceLevel >= config.thresholds.vwapStretchPct
+		: false;
+	const reclaimed = referenceLevel
+		? isLong
+			? latest.close > referenceLevel
+			: latest.close < referenceLevel
+		: false;
 	const divergence =
 		indicator.cvdDivergence === (isLong ? "bullish" : "bearish");
-	return wickLarge && reclaimed && divergence;
+	const active =
+		referenceLevel !== null && wickLarge && reclaimed && divergence;
+	return {
+		name: `liquiditySweep${isLong ? "Long" : "Short"}`,
+		side,
+		active,
+		checks: {
+			referenceLevel: referenceLevel ?? null,
+			atr,
+			wickSize,
+			wickLarge,
+			reclaimed,
+			divergence,
+		},
+	};
 };
 
 const computeConfidenceScore = (
