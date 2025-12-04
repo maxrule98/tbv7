@@ -65,6 +65,8 @@ interface TimeframeSeries {
 	candles: Candle[];
 }
 
+type WarmupMap = Map<string, number>;
+
 export const runBacktest = async (
 	backtestConfig: BacktestConfig,
 	options: RunBacktestOptions = {}
@@ -127,10 +129,26 @@ export const runBacktest = async (
 		agenaiConfig.strategy,
 		backtestConfig.timeframe
 	);
+	const warmupByTimeframe = deriveWarmupCandles(
+		backtestConfig.strategyId,
+		agenaiConfig.strategy,
+		backtestConfig.timeframe
+	);
 
 	const timeframeSeries: TimeframeSeries[] = options.timeframeData
 		? buildProvidedSeries(options.timeframeData, trackedTimeframes)
-		: await loadTimeframeSeries(client, backtestConfig, trackedTimeframes);
+		: await loadTimeframeSeries(
+				client,
+				backtestConfig,
+				trackedTimeframes,
+				warmupByTimeframe
+		  );
+
+	const cache = new BacktestTimeframeCache({
+		timeframes: trackedTimeframes,
+		limit: Math.max(backtestConfig.maxCandles ?? 600, 300),
+	});
+	primeCacheWithWarmup(timeframeSeries, cache, backtestConfig.startTimestamp);
 
 	const executionSeries = timeframeSeries.find(
 		(series) => series.timeframe === backtestConfig.timeframe
@@ -138,11 +156,6 @@ export const runBacktest = async (
 	if (!executionSeries || executionSeries.candles.length === 0) {
 		throw new Error("No candles loaded for execution timeframe");
 	}
-
-	const cache = new BacktestTimeframeCache({
-		timeframes: trackedTimeframes,
-		limit: Math.max(backtestConfig.maxCandles ?? 600, 300),
-	});
 
 	const strategySource: StrategySource = options.strategyOverride
 		? "override"
@@ -353,10 +366,77 @@ const deriveStrategyTimeframes = (
 	return Array.from(frames);
 };
 
+const deriveWarmupCandles = (
+	strategyId: StrategyId,
+	strategyConfig: StrategyConfig,
+	executionTimeframe: string
+): WarmupMap => {
+	const warmup = new Map<string, number>();
+	const ensure = (timeframe: string, candles: number): void => {
+		if (!timeframe) {
+			return;
+		}
+		const normalized = Math.max(0, Math.floor(candles));
+		const current = warmup.get(timeframe) ?? 0;
+		warmup.set(timeframe, Math.max(current, normalized));
+	};
+
+	ensure(executionTimeframe, 300);
+
+	if (strategyId === "vwap_delta_gamma") {
+		const cfg = strategyConfig as VWAPDeltaGammaConfig;
+		ensure(cfg.timeframes.execution, cfg.vwapRollingLong + 20);
+		ensure(cfg.timeframes.trend, Math.max(cfg.vwapRollingLong / 2, 150));
+		ensure(cfg.timeframes.bias, 180);
+		ensure(cfg.timeframes.macro, 120);
+	}
+
+	if (strategyId === "ultra_aggressive_btc_usdt") {
+		const cfg = strategyConfig as UltraAggressiveBtcUsdtConfig;
+		const maxLookback = Math.max(
+			cfg.lookbacks.executionBars,
+			cfg.lookbacks.breakoutRange,
+			cfg.lookbacks.rangeDetection,
+			cfg.lookbacks.trendCandles,
+			cfg.lookbacks.volatility,
+			cfg.lookbacks.cvd
+		);
+		ensure(cfg.timeframes.execution, maxLookback + 20);
+		ensure(cfg.timeframes.confirming, Math.max(maxLookback / 3, 100));
+		ensure(cfg.timeframes.context, Math.max(maxLookback / 4, 80));
+	}
+
+	return warmup;
+};
+
+const primeCacheWithWarmup = (
+	series: TimeframeSeries[],
+	cache: BacktestTimeframeCache,
+	startTimestamp: number
+): void => {
+	for (const frame of series) {
+		if (!frame.candles.length) {
+			continue;
+		}
+		let partition = 0;
+		while (
+			partition < frame.candles.length &&
+			frame.candles[partition].timestamp < startTimestamp
+		) {
+			partition += 1;
+		}
+		if (partition > 0) {
+			cache.setCandles(frame.timeframe, frame.candles.slice(0, partition));
+			frame.candles = frame.candles.slice(partition);
+		}
+	}
+};
+
 const loadTimeframeSeries = async (
 	client: MexcClient,
 	backtestConfig: BacktestConfig,
-	timeframes: string[]
+	timeframes: string[],
+	warmupByTimeframe: WarmupMap
 ): Promise<TimeframeSeries[]> => {
 	const series: TimeframeSeries[] = [];
 	for (const timeframe of timeframes) {
@@ -364,18 +444,21 @@ const loadTimeframeSeries = async (
 			timeframe === backtestConfig.timeframe
 				? backtestConfig.maxCandles
 				: undefined;
+		const warmupCandles = warmupByTimeframe.get(timeframe) ?? 0;
 		const candles = await fetchHistoricalCandles(
 			client,
 			backtestConfig.symbol,
 			timeframe,
 			backtestConfig.startTimestamp,
 			backtestConfig.endTimestamp,
-			limit
+			limit,
+			warmupCandles
 		);
 		series.push({ timeframe, candles });
 		runtimeLogger.info("backtest_timeframe_loaded", {
 			timeframe,
 			candles: candles.length,
+			warmupCandles,
 		});
 	}
 	return series;
@@ -402,18 +485,21 @@ const fetchHistoricalCandles = async (
 	timeframe: string,
 	startTs: number,
 	endTs: number,
-	maxCandles?: number
+	maxCandles?: number,
+	warmupCandles = 0
 ): Promise<Candle[]> => {
 	const result: Candle[] = [];
-	let since = startTs;
+	const warmupMs = timeframeToMs(timeframe) * Math.max(0, warmupCandles);
+	let since = Math.max(0, startTs - warmupMs);
 	const limit = 500;
 	let safety = 0;
 	const maxIterations = 10_000;
+	let inRangeCount = 0;
 
 	while (since <= endTs && safety < maxIterations) {
 		const remaining =
 			typeof maxCandles === "number" && maxCandles > 0
-				? Math.min(limit, Math.max(maxCandles - result.length, 0))
+				? Math.min(limit, Math.max(maxCandles - inRangeCount, 0))
 				: limit;
 		if (remaining <= 0) {
 			break;
@@ -425,14 +511,14 @@ const fetchHistoricalCandles = async (
 		}
 
 		for (const candle of batch) {
-			if (candle.timestamp < startTs) {
-				continue;
-			}
 			if (candle.timestamp > endTs) {
 				return result;
 			}
 			result.push(candle);
-			if (maxCandles && result.length >= maxCandles) {
+			if (candle.timestamp >= startTs) {
+				inRangeCount += 1;
+			}
+			if (maxCandles && inRangeCount >= maxCandles) {
 				return result;
 			}
 		}
