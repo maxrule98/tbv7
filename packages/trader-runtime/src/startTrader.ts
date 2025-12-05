@@ -8,6 +8,11 @@ import {
 	loadAccountConfig,
 	loadAgenaiConfig,
 } from "@agenai/core";
+import {
+	DefaultDataProvider,
+	timeframeToMs,
+	type DataProvider,
+} from "@agenai/data";
 import { MexcClient } from "@agenai/exchange-mexc";
 import { ExecutionEngine, PaperAccount } from "@agenai/execution-engine";
 import { RiskManager } from "@agenai/risk-engine";
@@ -36,6 +41,7 @@ import type { TraderStrategy } from "./types";
 export type { TraderStrategy } from "./types";
 
 export const DEFAULT_POLL_INTERVAL_MS = 10_000;
+const BOOTSTRAP_CANDLE_LIMIT = 300;
 
 export interface TraderConfig {
 	symbol: string;
@@ -57,6 +63,7 @@ export interface StartTraderOptions {
 	riskProfile?: string;
 	strategyOverride?: TraderStrategy;
 	strategyBuilder?: (client: MexcClient) => Promise<TraderStrategy>;
+	dataProvider?: DataProvider;
 }
 
 export const startTrader = async (
@@ -86,6 +93,9 @@ export const startTrader = async (
 		secret: agenaiConfig.exchange.credentials.apiSecret,
 		useFutures: true,
 	});
+
+	const dataProvider =
+		options.dataProvider ?? new DefaultDataProvider({ client });
 
 	const effectiveBuilder =
 		options.strategyBuilder ??
@@ -137,7 +147,7 @@ export const startTrader = async (
 		executionMode,
 		builderName:
 			strategySource === "builder"
-				? options.strategyBuilder?.name ?? effectiveBuilder.name
+				? (options.strategyBuilder?.name ?? effectiveBuilder.name)
 				: undefined,
 		profiles: {
 			account: options.accountProfile,
@@ -153,7 +163,7 @@ export const startTrader = async (
 	const lastTimestampBySymbol = new Map<string, number>();
 
 	await bootstrapCandles(
-		client,
+		dataProvider,
 		traderConfig.symbol,
 		traderConfig.timeframe,
 		candlesBySymbol,
@@ -161,7 +171,7 @@ export const startTrader = async (
 	);
 
 	return startPolling(
-		client,
+		dataProvider,
 		strategy,
 		riskManager,
 		agenaiConfig.risk,
@@ -176,28 +186,48 @@ export const startTrader = async (
 };
 
 const bootstrapCandles = async (
-	client: MexcClient,
+	dataProvider: DataProvider,
 	symbol: string,
 	timeframe: string,
 	candlesBySymbol: Map<string, Candle[]>,
 	lastTimestampBySymbol: Map<string, number>
 ): Promise<void> => {
+	const now = Date.now();
+	const windowMs = timeframeToMs(timeframe) * (BOOTSTRAP_CANDLE_LIMIT + 5);
+	const startTimestamp = Math.max(0, now - windowMs);
 	try {
-		const candles = await client.fetchOHLCV(symbol, timeframe, 300);
+		const [series] = await dataProvider.loadHistoricalSeries({
+			symbol,
+			startTimestamp,
+			endTimestamp: now,
+			requests: [
+				{
+					timeframe,
+					limit: BOOTSTRAP_CANDLE_LIMIT,
+				},
+			],
+		});
+
+		const candles = series?.candles ?? [];
 		if (!candles.length) {
 			runtimeLogger.warn("bootstrap_no_candles", { symbol, timeframe });
 			return;
 		}
 
-		candlesBySymbol.set(symbol, candles);
+		const trimmed =
+			candles.length <= BOOTSTRAP_CANDLE_LIMIT
+				? candles
+				: candles.slice(candles.length - BOOTSTRAP_CANDLE_LIMIT);
+
+		candlesBySymbol.set(symbol, trimmed);
 		lastTimestampBySymbol.set(
 			symbol,
-			candles[candles.length - 1]?.timestamp ?? 0
+			trimmed[trimmed.length - 1]?.timestamp ?? 0
 		);
 		runtimeLogger.info("bootstrap_candles_loaded", {
 			symbol,
 			timeframe,
-			count: candles.length,
+			count: trimmed.length,
 		});
 	} catch (error) {
 		logMarketDataError(error);
@@ -205,7 +235,7 @@ const bootstrapCandles = async (
 };
 
 const startPolling = async (
-	client: MexcClient,
+	dataProvider: DataProvider,
 	strategy: TraderStrategy,
 	riskManager: RiskManager,
 	riskConfig: RiskConfig,
@@ -218,149 +248,150 @@ const startPolling = async (
 	pollIntervalMs: number
 ): Promise<never> => {
 	let fallbackEquity = defaultEquity;
-	while (true) {
-		let latest: Candle | undefined;
-		try {
-			const candles = await client.fetchOHLCV(symbol, timeframe, 1);
-			const latestRaw = candles[candles.length - 1];
+	const subscription = dataProvider.createLiveSubscription({
+		symbol,
+		timeframes: [timeframe],
+		pollIntervalMs,
+		bufferSize: 500,
+	});
 
-			if (!latestRaw) {
-				runtimeLogger.warn("poll_no_candle", { symbol, timeframe });
-			} else {
-				latest = latestRaw;
-			}
-		} catch (error) {
-			logMarketDataError(error);
+	let queue = Promise.resolve();
+
+	const processCandle = async (latest: Candle): Promise<void> => {
+		const lastTimestamp = lastTimestampBySymbol.get(symbol);
+		if (lastTimestamp === latest.timestamp) {
+			runtimeLogger.debug("poll_no_update", {
+				symbol,
+				timeframe,
+				lastTimestamp,
+			});
+			return;
 		}
 
-		if (latest) {
-			const lastTimestamp = lastTimestampBySymbol.get(symbol);
+		lastTimestampBySymbol.set(symbol, latest.timestamp);
+		const buffer = appendCandle(candlesBySymbol, latest);
+		logCandle(latest);
 
-			if (lastTimestamp !== latest.timestamp) {
-				lastTimestampBySymbol.set(symbol, latest.timestamp);
-				const buffer = appendCandle(candlesBySymbol, latest);
-				logCandle(latest);
+		const positionState = executionEngine.getPosition(symbol);
+		const unrealizedPnl = calculateUnrealizedPnl(positionState, latest.close);
+		const prePlanSnapshot = executionEngine.snapshotPaperAccount(unrealizedPnl);
+		const accountEquity = prePlanSnapshot?.equity ?? fallbackEquity;
 
-				const positionState = executionEngine.getPosition(symbol);
-				const unrealizedPnl = calculateUnrealizedPnl(
-					positionState,
-					latest.close
-				);
-				const prePlanSnapshot =
-					executionEngine.snapshotPaperAccount(unrealizedPnl);
-				const accountEquity = prePlanSnapshot?.equity ?? fallbackEquity;
+		const forcedExitHandled = await maybeHandleForcedExit(
+			positionState,
+			latest,
+			riskManager,
+			executionEngine,
+			accountEquity
+		);
+		if (forcedExitHandled) {
+			const accountSnapshot = logAndSnapshotPosition(
+				executionEngine,
+				symbol,
+				latest.close,
+				latest.timestamp
+			);
+			if (accountSnapshot) {
+				fallbackEquity = accountSnapshot.equity;
+			}
+			return;
+		}
 
-				const forcedExitHandled = await maybeHandleForcedExit(
-					positionState,
-					latest,
-					riskManager,
-					executionEngine,
-					accountEquity
-				);
-				if (forcedExitHandled) {
-					const accountSnapshot = logAndSnapshotPosition(
-						executionEngine,
-						symbol,
-						latest.close,
-						latest.timestamp
-					);
-					if (accountSnapshot) {
-						fallbackEquity = accountSnapshot.equity;
-					}
-					await delay(pollIntervalMs);
-					continue;
-				}
+		const trailingExitHandled = await maybeHandleTrailingStop(
+			symbol,
+			positionState,
+			latest,
+			riskManager,
+			executionEngine,
+			accountEquity,
+			riskConfig
+		);
+		if (trailingExitHandled) {
+			const accountSnapshot = logAndSnapshotPosition(
+				executionEngine,
+				symbol,
+				latest.close,
+				latest.timestamp
+			);
+			if (accountSnapshot) {
+				fallbackEquity = accountSnapshot.equity;
+			}
+			return;
+		}
 
-				const trailingExitHandled = await maybeHandleTrailingStop(
-					symbol,
-					positionState,
-					latest,
-					riskManager,
-					executionEngine,
-					accountEquity,
-					riskConfig
-				);
-				if (trailingExitHandled) {
-					const accountSnapshot = logAndSnapshotPosition(
-						executionEngine,
-						symbol,
-						latest.close,
-						latest.timestamp
-					);
-					if (accountSnapshot) {
-						fallbackEquity = accountSnapshot.equity;
-					}
-					await delay(pollIntervalMs);
-					continue;
-				}
+		const intent = enrichIntentMetadata(
+			await strategy.decide(buffer, positionState.side)
+		);
+		logStrategyDecision(latest, intent);
 
-				const intent = enrichIntentMetadata(
-					await strategy.decide(buffer, positionState.side)
-				);
-				logStrategyDecision(latest, intent);
-
-				const plan = riskManager.plan(
-					intent,
-					latest.close,
-					accountEquity,
-					positionState
-				);
-				if (!plan) {
-					if (intent.intent !== "NO_ACTION") {
-						const reason =
-							intent.intent === "CLOSE_LONG" || intent.intent === "CLOSE_SHORT"
-								? "no_position_to_close"
-								: "risk_plan_rejected";
-						logExecutionSkipped(intent, positionState.side, reason);
-					}
-				} else {
-					const skipReason = getPreExecutionSkipReason(plan, positionState);
-					if (skipReason) {
-						logExecutionSkipped(plan, positionState.side, skipReason);
+		const plan = riskManager.plan(
+			intent,
+			latest.close,
+			accountEquity,
+			positionState
+		);
+		if (!plan) {
+			if (intent.intent !== "NO_ACTION") {
+				const reason =
+					intent.intent === "CLOSE_LONG" || intent.intent === "CLOSE_SHORT"
+						? "no_position_to_close"
+						: "risk_plan_rejected";
+				logExecutionSkipped(intent, positionState.side, reason);
+			}
+		} else {
+			const skipReason = getPreExecutionSkipReason(plan, positionState);
+			if (skipReason) {
+				logExecutionSkipped(plan, positionState.side, skipReason);
+			} else {
+				logTradePlan(plan, latest, intent);
+				try {
+					const result = await executionEngine.execute(plan, {
+						price: latest.close,
+					});
+					if (result.status === "skipped") {
+						logExecutionSkipped(
+							plan,
+							positionState.side,
+							result.reason ?? "execution_engine_skip"
+						);
 					} else {
-						logTradePlan(plan, latest, intent);
-						try {
-							const result = await executionEngine.execute(plan, {
-								price: latest.close,
-							});
-							if (result.status === "skipped") {
-								logExecutionSkipped(
-									plan,
-									positionState.side,
-									result.reason ?? "execution_engine_skip"
-								);
-							} else {
-								logExecutionResult(result);
-							}
-						} catch (error) {
-							logExecutionError(error, plan);
-						}
+						logExecutionResult(result);
 					}
+				} catch (error) {
+					logExecutionError(error, plan);
 				}
-
-				const latestPosition = executionEngine.getPosition(symbol);
-				logPaperPosition(symbol, latestPosition);
-
-				const accountSnapshot = snapshotPaperAccount(
-					executionEngine,
-					calculateUnrealizedPnl(latestPosition, latest.close),
-					symbol,
-					latest.timestamp
-				);
-				if (accountSnapshot) {
-					fallbackEquity = accountSnapshot.equity;
-				}
-			} else {
-				runtimeLogger.debug("poll_no_update", {
-					symbol,
-					timeframe,
-					lastTimestamp,
-				});
 			}
-
-			await delay(pollIntervalMs);
 		}
-	}
+
+		const latestPosition = executionEngine.getPosition(symbol);
+		logPaperPosition(symbol, latestPosition);
+
+		const accountSnapshot = snapshotPaperAccount(
+			executionEngine,
+			calculateUnrealizedPnl(latestPosition, latest.close),
+			symbol,
+			latest.timestamp
+		);
+		if (accountSnapshot) {
+			fallbackEquity = accountSnapshot.equity;
+		}
+	};
+
+	subscription.onCandle((candle) => {
+		queue = queue
+			.then(() => processCandle(candle))
+			.catch((error) => {
+				runtimeLogger.error("live_candle_processing_error", {
+					error: error instanceof Error ? error.message : String(error),
+				});
+			});
+		return queue;
+	});
+
+	subscription.start();
+	return new Promise<never>(() => {
+		// Keeps the process alive; shutdown handled externally.
+	});
 };
 
 const appendCandle = (
@@ -389,8 +420,3 @@ const logCandle = (candle: Candle): void => {
 	};
 	runtimeLogger.debug("latest_candle", payload);
 };
-
-const delay = (ms: number): Promise<void> =>
-	new Promise((resolve) => {
-		setTimeout(resolve, ms);
-	});

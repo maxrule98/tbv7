@@ -14,6 +14,12 @@ import {
 	loadAgenaiConfig,
 	loadStrategyConfig,
 } from "@agenai/core";
+import {
+	DefaultDataProvider,
+	type DataProvider,
+	type HistoricalSeriesRequest,
+	type TimeframeSeries,
+} from "@agenai/data";
 import { MexcClient } from "@agenai/exchange-mexc";
 import {
 	ExecutionEngine,
@@ -58,12 +64,8 @@ export interface RunBacktestOptions {
 	riskProfile?: string;
 	strategyOverride?: TraderStrategy;
 	client?: MexcClient;
+	dataProvider?: DataProvider;
 	timeframeData?: Record<string, Candle[]>;
-}
-
-interface TimeframeSeries {
-	timeframe: string;
-	candles: Candle[];
 }
 
 type WarmupMap = Map<string, number>;
@@ -153,6 +155,9 @@ export const runBacktest = async (
 			useFutures: true,
 		});
 
+	const dataProvider =
+		options.dataProvider ?? new DefaultDataProvider({ client });
+
 	const riskManager = new RiskManager(agenaiConfig.risk);
 	const initialBalance =
 		backtestConfig.initialBalance ?? accountConfig.startingBalance ?? 1000;
@@ -187,7 +192,7 @@ export const runBacktest = async (
 	const timeframeSeries: TimeframeSeries[] = options.timeframeData
 		? buildProvidedSeries(options.timeframeData, trackedTimeframes)
 		: await loadTimeframeSeries(
-				client,
+				dataProvider,
 				backtestConfig,
 				trackedTimeframes,
 				warmupByTimeframe
@@ -482,32 +487,32 @@ const primeCacheWithWarmup = (
 };
 
 const loadTimeframeSeries = async (
-	client: MexcClient,
+	dataProvider: DataProvider,
 	backtestConfig: BacktestConfig,
 	timeframes: string[],
 	warmupByTimeframe: WarmupMap
 ): Promise<TimeframeSeries[]> => {
-	const series: TimeframeSeries[] = [];
-	for (const timeframe of timeframes) {
-		const limit =
-			timeframe === backtestConfig.timeframe
-				? backtestConfig.maxCandles
-				: undefined;
-		const warmupCandles = warmupByTimeframe.get(timeframe) ?? 0;
-		const candles = await fetchHistoricalCandles(
-			client,
-			backtestConfig.symbol,
+	const request: HistoricalSeriesRequest = {
+		symbol: backtestConfig.symbol,
+		startTimestamp: backtestConfig.startTimestamp,
+		endTimestamp: backtestConfig.endTimestamp,
+		requests: timeframes.map((timeframe) => ({
 			timeframe,
-			backtestConfig.startTimestamp,
-			backtestConfig.endTimestamp,
-			limit,
-			warmupCandles
-		);
-		series.push({ timeframe, candles });
+			warmup: warmupByTimeframe.get(timeframe) ?? 0,
+			limit:
+				timeframe === backtestConfig.timeframe &&
+				typeof backtestConfig.maxCandles === "number"
+					? backtestConfig.maxCandles
+					: undefined,
+		})),
+	};
+
+	const series = await dataProvider.loadHistoricalSeries(request);
+	for (const frame of series) {
 		runtimeLogger.info("backtest_timeframe_loaded", {
-			timeframe,
-			candles: candles.length,
-			warmupCandles,
+			timeframe: frame.timeframe,
+			candles: frame.candles.length,
+			warmupCandles: warmupByTimeframe.get(frame.timeframe) ?? 0,
 		});
 	}
 	return series;
@@ -526,86 +531,6 @@ const buildProvidedSeries = (
 		});
 		return { timeframe, candles: [...candles] };
 	});
-};
-
-const fetchHistoricalCandles = async (
-	client: MexcClient,
-	symbol: string,
-	timeframe: string,
-	startTs: number,
-	endTs: number,
-	maxCandles?: number,
-	warmupCandles = 0
-): Promise<Candle[]> => {
-	const result: Candle[] = [];
-	const warmupMs = timeframeToMs(timeframe) * Math.max(0, warmupCandles);
-	let since = Math.max(0, startTs - warmupMs);
-	const limit = 500;
-	let safety = 0;
-	const maxIterations = 10_000;
-	let inRangeCount = 0;
-
-	while (since <= endTs && safety < maxIterations) {
-		const remaining =
-			typeof maxCandles === "number" && maxCandles > 0
-				? Math.min(limit, Math.max(maxCandles - inRangeCount, 0))
-				: limit;
-		if (remaining <= 0) {
-			break;
-		}
-
-		const batch = await client.fetchOHLCV(symbol, timeframe, remaining, since);
-		if (!batch.length) {
-			break;
-		}
-
-		for (const candle of batch) {
-			if (candle.timestamp > endTs) {
-				return result;
-			}
-			result.push(candle);
-			if (candle.timestamp >= startTs) {
-				inRangeCount += 1;
-			}
-			if (maxCandles && inRangeCount >= maxCandles) {
-				return result;
-			}
-		}
-
-		const last = batch[batch.length - 1];
-		if (!last) {
-			break;
-		}
-		const nextSince = last.timestamp + timeframeToMs(timeframe);
-		if (nextSince <= since) {
-			break;
-		}
-		since = nextSince;
-		safety += 1;
-	}
-
-	return result;
-};
-
-const timeframeToMs = (timeframe: string): number => {
-	const match = timeframe.match(/^(\d+)([smhdw])$/i);
-	if (!match) {
-		throw new Error(`Unsupported timeframe format: ${timeframe}`);
-	}
-	const value = Number(match[1]);
-	const unit = match[2].toLowerCase();
-	const unitToMs: Record<string, number> = {
-		s: 1000,
-		m: 60_000,
-		h: 3_600_000,
-		d: 86_400_000,
-		w: 604_800_000,
-	};
-	const factor = unitToMs[unit];
-	if (!factor) {
-		throw new Error(`Unsupported timeframe unit: ${timeframe}`);
-	}
-	return value * factor;
 };
 
 const updateCacheUntilTimestamp = (

@@ -10,6 +10,7 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
+		"@agenai/data": "workspace:*",
 		"@agenai/core": "workspace:*",
 		"@agenai/exchange-mexc": "workspace:*",
 		"@agenai/execution-engine": "workspace:*",

@@ -87,6 +87,25 @@ importers:
         specifier: ^5.0.5
         version: 5.0.10
 
+  packages/data:
+    dependencies:
+      '@agenai/core':
+        specifier: workspace:*
+        version: link:../core
+      '@agenai/exchange-mexc':
+        specifier: workspace:*
+        version: link:../exchange-mexc
+      ws:
+        specifier: ^8.16.0
+        version: 8.18.3
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.5.10
+        version: 8.18.1
+      rimraf:
+        specifier: ^5.0.5
+        version: 5.0.10
+
   packages/exchange-binance:
     dependencies:
       '@agenai/core':
@@ -119,6 +138,15 @@ importers:
 
   packages/indicators: {}
 
+  packages/metrics:
+    dependencies:
+      '@agenai/core':
+        specifier: workspace:*
+        version: link:../core
+      '@agenai/trader-runtime':
+        specifier: workspace:*
+        version: link:../trader-runtime
+
   packages/models-quant: {}
 
   packages/persistence: {}
@@ -150,6 +178,9 @@ importers:
       '@agenai/core':
         specifier: workspace:*
         version: link:../core
+      '@agenai/data':
+        specifier: workspace:*
+        version: link:../data
       '@agenai/exchange-mexc':
         specifier: workspace:*
         version: link:../exchange-mexc
@@ -745,6 +776,12 @@ packages:
     resolution: {integrity: sha512-ZsJzA5thDQMSQO788d7IocwwQbI8B5OPzmqNvpf3NY/+MHDAS759Wo0gd2WQeXYt5AAAQjzcrTVC6SKCuYgoCQ==}
     dependencies:
       undici-types: 6.21.0
+
+  /@types/ws@8.18.1:
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
+    dependencies:
+      '@types/node': 20.19.25
+    dev: true
 
   /@typescript-eslint/eslint-plugin@7.18.0(@typescript-eslint/parser@7.18.0)(eslint@8.57.1)(typescript@5.9.3):
     resolution: {integrity: sha512-94EQTWZ40mzBc42ATNIBimBEDltSJ9RQHCC8vc/PDbxi4k8dVwUAv4o98dk50M1zB+JGFxp43FP7f8+FP8R6Sw==}

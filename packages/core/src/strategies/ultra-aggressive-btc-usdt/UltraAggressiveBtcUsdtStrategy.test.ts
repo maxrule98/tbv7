@@ -121,6 +121,12 @@ const buildTestConfig = (): UltraAggressiveBtcUsdtConfig => ({
 		volatility: 6,
 		cvd: 10,
 	},
+	playTypePriority: [
+		"liquiditySweep",
+		"breakout",
+		"meanReversion",
+		"breakoutTrap",
+	],
 	thresholds: {
 		vwapStretchPct: 0.0001,
 		breakoutVolumeMultiple: 1,
@@ -140,6 +146,12 @@ const buildTestConfig = (): UltraAggressiveBtcUsdtConfig => ({
 		trailingAtrMultiple: 1,
 	},
 	maxTradeDurationMinutes: 60,
+	enableVolatilityFadeExit: true,
+	allowBreakoutsWhenRSIOverbought: false,
+	reversionNeedsTwoOfThreeConditions: true,
+	maxDrawdownPerTradePct: 0.01,
+	cooldownAfterStopoutBars: 5,
+	dailyDrawdownLimitPct: 0.03,
 });
 
 describe("UltraAggressiveBtcUsdtStrategy", () => {

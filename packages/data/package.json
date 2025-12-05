@@ -1,0 +1,21 @@
+{
+	"name": "@agenai/data",
+	"version": "0.1.0",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "rimraf dist && tsc -p tsconfig.build.json",
+		"dev": "ts-node src/index.ts",
+		"lint": "eslint 'src/**/*.ts'",
+		"test": "vitest run --passWithNoTests"
+	},
+	"dependencies": {
+		"@agenai/core": "workspace:*",
+		"@agenai/exchange-mexc": "workspace:*",
+		"ws": "^8.16.0"
+	},
+	"devDependencies": {
+		"@types/ws": "^8.5.10",
+		"rimraf": "^5.0.5"
+	}
+}
