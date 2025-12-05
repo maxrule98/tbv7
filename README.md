@@ -9,7 +9,6 @@ This repository starts fresh at **v1**, representing the final architecture alig
 ## 🚀 Project Goals
 
 - Build a **powerful, modular trading engine** with:
-
   - Exchange adapters (currently MEXC USDT-M perpetuals)
   - Real-time WebSocket market data
   - Deterministic indicator pipelines (MACD, EMA, RSI, ATR…)
@@ -181,6 +180,23 @@ pnpm --filter trader-cli dev
 ```bash
 pnpm dev
 ```
+
+---
+
+## 🧰 Developer Commands
+
+Quick reference for the unified workspace scripts:
+
+| Command                                                | Description                                                                 |
+| ------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `pnpm dev`                                             | Run every package's local development watcher (recursive `dev`).            |
+| `pnpm test`                                            | Validate strategy structure, then execute all package test suites.          |
+| `pnpm backtest -- --start <iso> --end <iso> [options]` | Launch the backtest CLI with passthrough CLI args.                          |
+| `pnpm metrics:process [--file <path>]`                 | Summarize the latest `output/backtests/*.json` result (or a provided file). |
+| `pnpm strategy:list [--json]`                          | Print the registered strategies from the core registry.                     |
+| `pnpm validate:strategies`                             | Standalone structural validation for per-strategy folders.                  |
+| `pnpm clean`                                           | Remove build artifacts across packages and the `output/` folder.            |
+| `pnpm format`                                          | Format the entire repo with Prettier.                                       |
 
 ---
 
