@@ -1,13 +1,17 @@
 import {
+	Candle,
+	MultiTimeframeCache,
+	PositionSide,
 	StrategyConfig,
 	StrategyId,
-	UltraAggressiveBtcUsdtConfig,
-	VWAPDeltaGammaConfig,
+	TradeIntent,
+	createLogger,
+	loadStrategy,
 } from "@agenai/core";
 import { MexcClient } from "@agenai/exchange-mexc";
 import type { TraderStrategy } from "./types";
-import { createVwapStrategyBuilder } from "./vwapStrategyBuilder";
-import { createUltraAggressiveStrategyBuilder } from "./ultraAggressiveStrategyBuilder";
+
+const logger = createLogger("strategy-builder");
 
 interface StrategyBuilderContext {
 	strategyConfig: StrategyConfig;
@@ -15,30 +19,81 @@ interface StrategyBuilderContext {
 	timeframe: string;
 }
 
-type StrategyBuilderFactory = (
-	context: StrategyBuilderContext
-) => (client: MexcClient) => Promise<TraderStrategy>;
-
-const strategyBuilders: Record<StrategyId, StrategyBuilderFactory> = {
-	vwap_delta_gamma: ({ strategyConfig, symbol }) =>
-		createVwapStrategyBuilder({
-			symbol,
-			config: strategyConfig as VWAPDeltaGammaConfig,
-		}),
-	ultra_aggressive_btc_usdt: ({ strategyConfig, symbol }) =>
-		createUltraAggressiveStrategyBuilder({
-			symbol,
-			config: strategyConfig as UltraAggressiveBtcUsdtConfig,
-		}),
-};
-
 export const resolveStrategyBuilder = (
 	strategyId: StrategyId,
 	context: StrategyBuilderContext
 ): ((client: MexcClient) => Promise<TraderStrategy>) => {
-	const factory = strategyBuilders[strategyId];
-	if (!factory) {
-		throw new Error(`No strategy builder registered for ${strategyId}`);
+	return async (client: MexcClient): Promise<TraderStrategy> => {
+		let timeframes = deriveTimeframes(context.strategyConfig);
+		if (!timeframes.includes(context.timeframe)) {
+			timeframes = [...timeframes, context.timeframe];
+		}
+		const cacheTtl = (context.strategyConfig as { cacheTTLms?: number })
+			.cacheTTLms;
+		const { strategy, cache, manifest } = await loadStrategy({
+			strategyId,
+			config: context.strategyConfig,
+			cache: {
+				fetcher: (symbolArg: string, timeframeArg: string, limit: number) =>
+					client.fetchOHLCV(symbolArg, timeframeArg, limit),
+				symbol: context.symbol,
+				timeframes,
+				maxAgeMs: cacheTtl,
+			},
+		});
+
+		if (!cache) {
+			throw new Error(
+				`Strategy ${strategyId} did not expose a cache dependency, cannot build runtime adapter`
+			);
+		}
+
+		logger.info("strategy_adapter_initialized", {
+			strategyId,
+			strategyName: manifest.name,
+			symbol: context.symbol,
+			timeframes,
+			cacheTtlMs: cacheTtl ?? null,
+		});
+
+		return new CacheBackedStrategyAdapter(
+			strategy as CacheDrivenStrategy,
+			cache
+		);
+	};
+};
+
+type CacheDrivenStrategy = {
+	decide: (position: PositionSide) => Promise<TradeIntent>;
+};
+
+class CacheBackedStrategyAdapter implements TraderStrategy {
+	constructor(
+		private readonly strategy: CacheDrivenStrategy,
+		private readonly cache: MultiTimeframeCache
+	) {}
+
+	async decide(
+		_candles: Candle[],
+		position: PositionSide
+	): Promise<TradeIntent> {
+		await this.cache.refreshAll();
+		return this.strategy.decide(position);
 	}
-	return factory(context);
+}
+
+const deriveTimeframes = (strategyConfig: StrategyConfig): string[] => {
+	const frames =
+		strategyConfig &&
+		typeof strategyConfig === "object" &&
+		"timeframes" in strategyConfig
+			? Object.values(
+					(strategyConfig as { timeframes?: Record<string, string> })
+						.timeframes ?? {}
+			  ).filter(
+					(value): value is string =>
+						typeof value === "string" && value.length > 0
+			  )
+			: [];
+	return Array.from(new Set(frames));
 };

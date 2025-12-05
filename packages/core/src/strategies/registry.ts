@@ -1,3 +1,7 @@
+import {
+	MultiTimeframeCache,
+	MultiTimeframeCacheOptions,
+} from "../data/multiTimeframeCache";
 import vwapDeltaGammaModule from "./vwap-delta-gamma";
 import ultraAggressiveModule from "./ultra-aggressive-btc-usdt";
 import { STRATEGY_IDS, isStrategyId, StrategyId } from "./ids";
@@ -21,7 +25,12 @@ export interface StrategyRegistryEntry<
 }
 
 export interface StrategyDependencyMetadata<TConfig, TDeps> {
-	createCache?: (...args: any[]) => unknown; // eslint-disable-line @typescript-eslint/no-explicit-any
+	createCache?: (
+		fetcher: MultiTimeframeCacheOptions["fetcher"],
+		symbol: string,
+		timeframes: string[],
+		maxAgeMs: number
+	) => MultiTimeframeCache;
 	warmup?: (config: TConfig, deps?: TDeps) => Promise<void> | void;
 }
 
@@ -41,14 +50,18 @@ const registryMap = registryEntries.reduce<
 
 export const strategyRegistry: AnyStrategyEntry[] = registryEntries;
 
-export const getStrategyDefinition = <TConfig = unknown>(
+export const getStrategyDefinition = <
+	TConfig = unknown,
+	TDeps = unknown,
+	TStrategy = unknown
+>(
 	id: StrategyId
-): StrategyRegistryEntry<TConfig> => {
+): StrategyRegistryEntry<TConfig, TDeps, TStrategy> => {
 	const definition = registryMap[id];
 	if (!definition) {
 		throw new Error(`Unknown strategy id: ${id}`);
 	}
-	return definition as StrategyRegistryEntry<TConfig>;
+	return definition as StrategyRegistryEntry<TConfig, TDeps, TStrategy>;
 };
 
 export const listStrategyDefinitions = (): AnyStrategyEntry[] => {

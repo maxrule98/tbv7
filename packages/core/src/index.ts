@@ -4,6 +4,7 @@ export * from "./data/multiTimeframeCache";
 export * from "./strategies/vwap-delta-gamma";
 export * from "./strategies/ultra-aggressive-btc-usdt";
 export * from "./strategies/registry";
+export * from "./strategies/loadStrategy";
 export * from "./strategies/ids";
 export * from "./strategies/selection";
 export * from "./utils/logger";
