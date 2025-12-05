@@ -1,10 +1,31 @@
 #!/usr/bin/env node
 
+import fs from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import process from "node:process";
 import { StrategyId, loadAgenaiConfig, loadStrategyConfig } from "@agenai/core";
 import { BacktestConfig, runBacktest } from "@agenai/trader-runtime";
 
 type ArgValue = string | boolean;
+
+type BacktestResultPayload = Awaited<ReturnType<typeof runBacktest>>;
+
+interface PersistContext {
+	strategyId: StrategyId;
+	symbol: string;
+	timeframe: string;
+	startTimestamp: number;
+	endTimestamp: number;
+	profiles: {
+		accountProfile?: string;
+		strategyProfile?: string;
+		riskProfile?: string;
+		exchangeProfile?: string;
+	};
+	strategyConfig: unknown;
+}
 
 const USAGE = `Usage:
   pnpm --filter @agenai/backtester-cli run dev -- --start <iso> --end <iso> [options]
@@ -23,6 +44,7 @@ Options (all optional unless noted):
   --strategyProfile <id>   Strategy profile name
   --riskProfile <id>       Risk profile name
   --exchangeProfile <id>   Exchange profile name
+	--withMetrics            Run metrics:process after saving the backtest file
   --json                   Print full JSON result payload
   --help                   Show this message
 `;
@@ -102,8 +124,64 @@ const resolveStrategyProfile = (
 		: "vwap-delta-gamma";
 };
 
+const persistBacktestResult = (
+	result: BacktestResultPayload,
+	context: PersistContext
+): string => {
+	const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+	const safeSymbol = context.symbol.replace(/[\\/]/g, "");
+	const fileName = `${context.strategyId}-${safeSymbol}-${context.timeframe}-${timestamp}.json`;
+	const outputDir = path.resolve(process.cwd(), "output", "backtests");
+	fs.mkdirSync(outputDir, { recursive: true });
+	const fingerprint = createHash("sha1")
+		.update(
+			JSON.stringify({
+				strategyId: context.strategyId,
+				symbol: context.symbol,
+				timeframe: context.timeframe,
+				profiles: context.profiles,
+				strategyConfig: context.strategyConfig,
+			})
+		)
+		.digest("hex")
+		.slice(0, 12);
+	const payload = {
+		...result,
+		metadata: {
+			strategyId: context.strategyId,
+			symbol: context.symbol,
+			timeframe: context.timeframe,
+			start: new Date(context.startTimestamp).toISOString(),
+			end: new Date(context.endTimestamp).toISOString(),
+			profiles: context.profiles,
+			configFingerprint: fingerprint,
+		},
+	};
+	const outputPath = path.join(outputDir, fileName);
+	fs.writeFileSync(outputPath, JSON.stringify(payload, null, 2));
+	const relative = path.relative(process.cwd(), outputPath) || outputPath;
+	console.log(`📤 Backtest saved to ${relative}`);
+	return outputPath;
+};
+
+const runMetricsForFile = (filePath: string): void => {
+	console.log("Running pnpm metrics:process ...");
+	const execResult = spawnSync(
+		"pnpm",
+		["--workspace-root", "metrics:process", "--file", filePath],
+		{
+			stdio: "inherit",
+		}
+	);
+	if (execResult.status !== 0) {
+		console.error("metrics:process exited with a non-zero status");
+	}
+};
+
 const main = async (): Promise<void> => {
 	const argMap = parseCliArgs(process.argv.slice(2));
+	const withMetrics =
+		argMap.withMetrics === true || argMap.withMetrics === "true";
 	if (argMap.help) {
 		console.log(USAGE);
 		return;
@@ -212,6 +290,20 @@ const main = async (): Promise<void> => {
 		console.log(`Starting balance: ${formatUsd(startingBalance)}`);
 		console.log(`Final equity: ${formatUsd(finalEquity)}`);
 		console.log(`Total PnL: ${formatUsd(totalPnl)}`);
+	}
+
+	const savedFile = persistBacktestResult(result, {
+		strategyId: requestedStrategyId,
+		symbol,
+		timeframe,
+		startTimestamp,
+		endTimestamp,
+		profiles,
+		strategyConfig: agenaiConfig.strategy,
+	});
+
+	if (withMetrics) {
+		runMetricsForFile(savedFile);
 	}
 };
 
