@@ -3,8 +3,8 @@ import path from "node:path";
 import dotenv from "dotenv";
 
 import type { StrategyId } from "./strategies/ids";
-import type { VWAPDeltaGammaConfig } from "./strategies/vwap-delta-gamma/VWAPDeltaGammaStrategy";
-import type { UltraAggressiveBtcUsdtConfig } from "./strategies/ultra-aggressive-btc-usdt/UltraAggressiveBtcUsdtStrategy";
+import type { VWAPDeltaGammaConfig } from "./strategies/vwap-delta-gamma/config";
+import type { UltraAggressiveBtcUsdtConfig } from "./strategies/ultra-aggressive-btc-usdt/config";
 export type { StrategyId } from "./strategies/ids";
 
 let envLoaded = false;

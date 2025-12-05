@@ -2,12 +2,12 @@ import {
 	VWAPDeltaGammaConfig,
 	VWAPDeltaGammaStrategy,
 	loadVWAPDeltaGammaConfig,
-} from "./vwap-delta-gamma/VWAPDeltaGammaStrategy";
+} from "./vwap-delta-gamma";
 import {
 	UltraAggressiveBtcUsdtConfig,
 	UltraAggressiveBtcUsdtStrategy,
 	loadUltraAggressiveConfig,
-} from "./ultra-aggressive-btc-usdt/UltraAggressiveBtcUsdtStrategy";
+} from "./ultra-aggressive-btc-usdt";
 import { STRATEGY_IDS, isStrategyId, StrategyId } from "./ids";
 
 export interface StrategyConfigLoaderOptions {

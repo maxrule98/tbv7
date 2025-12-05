@@ -1,10 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { Candle } from "../../types";
 import { MultiTimeframeCache } from "../../data/multiTimeframeCache";
-import {
-	UltraAggressiveBtcUsdtConfig,
-	UltraAggressiveBtcUsdtStrategy,
-} from "./UltraAggressiveBtcUsdtStrategy";
+import { UltraAggressiveBtcUsdtConfig } from "./config";
+import { UltraAggressiveBtcUsdtStrategy } from "./index";
 
 vi.mock("@agenai/indicators", () => ({
 	calculateATRSeries: () => Array(20).fill(2),
