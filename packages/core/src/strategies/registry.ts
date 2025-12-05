@@ -1,75 +1,58 @@
-import {
-	VWAPDeltaGammaConfig,
-	VWAPDeltaGammaStrategy,
-	loadVWAPDeltaGammaConfig,
-} from "./vwap-delta-gamma";
-import {
-	UltraAggressiveBtcUsdtConfig,
-	UltraAggressiveBtcUsdtStrategy,
-	loadUltraAggressiveConfig,
-} from "./ultra-aggressive-btc-usdt";
+import vwapDeltaGammaModule from "./vwap-delta-gamma";
+import ultraAggressiveModule from "./ultra-aggressive-btc-usdt";
 import { STRATEGY_IDS, isStrategyId, StrategyId } from "./ids";
 
-export interface StrategyConfigLoaderOptions {
-	configDir?: string;
-	profile?: string;
-	configPath?: string;
-}
+export type StrategyManifestSummary = {
+	strategyId: StrategyId;
+	name: string;
+};
 
-export type StrategyConstructor = new (...args: any[]) => unknown; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-export interface StrategyDefinition<
+export interface StrategyRegistryEntry<
 	TConfig = unknown,
-	TCtor extends StrategyConstructor = StrategyConstructor
+	TDeps = unknown,
+	TStrategy = unknown,
+	TManifest extends StrategyManifestSummary = StrategyManifestSummary
 > {
 	id: StrategyId;
-	className: string;
-	loadConfig: (options?: StrategyConfigLoaderOptions) => TConfig;
-	resolveStrategyClass: () => Promise<TCtor>;
-	defaultProfile?: string;
-	configPath?: string;
+	manifest: TManifest;
+	loadConfig: (configPath?: string) => TConfig;
+	createStrategy: (config: TConfig, deps: TDeps) => TStrategy;
+	dependencies?: StrategyDependencyMetadata<TConfig, TDeps>;
 }
 
-type StrategyDefinitionMap = {
-	vwap_delta_gamma: StrategyDefinition<
-		VWAPDeltaGammaConfig,
-		typeof VWAPDeltaGammaStrategy
-	>;
-	ultra_aggressive_btc_usdt: StrategyDefinition<
-		UltraAggressiveBtcUsdtConfig,
-		typeof UltraAggressiveBtcUsdtStrategy
-	>;
-};
+export interface StrategyDependencyMetadata<TConfig, TDeps> {
+	createCache?: (...args: any[]) => unknown; // eslint-disable-line @typescript-eslint/no-explicit-any
+	warmup?: (config: TConfig, deps?: TDeps) => Promise<void> | void;
+}
 
-const strategyRegistry: StrategyDefinitionMap = {
-	vwap_delta_gamma: {
-		id: "vwap_delta_gamma",
-		className: "VWAPDeltaGammaStrategy",
-		configPath: "config/strategies/vwap-delta-gamma.json",
-		loadConfig: ({ configPath } = {}) => loadVWAPDeltaGammaConfig(configPath),
-		resolveStrategyClass: async () => VWAPDeltaGammaStrategy,
-	},
-	ultra_aggressive_btc_usdt: {
-		id: "ultra_aggressive_btc_usdt",
-		className: "UltraAggressiveBtcUsdtStrategy",
-		configPath: "config/strategies/ultra-aggressive-btc-usdt.json",
-		loadConfig: ({ configPath } = {}) => loadUltraAggressiveConfig(configPath),
-		resolveStrategyClass: async () => UltraAggressiveBtcUsdtStrategy,
-	},
-};
+type AnyStrategyEntry = StrategyRegistryEntry<any, any, any>;
+
+const registryEntries = [
+	vwapDeltaGammaModule,
+	ultraAggressiveModule,
+] satisfies AnyStrategyEntry[];
+
+const registryMap = registryEntries.reduce<
+	Record<StrategyId, AnyStrategyEntry>
+>((acc, entry) => {
+	acc[entry.id] = entry;
+	return acc;
+}, {} as Record<StrategyId, AnyStrategyEntry>);
+
+export const strategyRegistry: AnyStrategyEntry[] = registryEntries;
 
 export const getStrategyDefinition = <TConfig = unknown>(
 	id: StrategyId
-): StrategyDefinition<TConfig> => {
-	const definition = strategyRegistry[id];
+): StrategyRegistryEntry<TConfig> => {
+	const definition = registryMap[id];
 	if (!definition) {
 		throw new Error(`Unknown strategy id: ${id}`);
 	}
-	return definition as StrategyDefinition<TConfig>;
+	return definition as StrategyRegistryEntry<TConfig>;
 };
 
-export const listStrategyDefinitions = (): StrategyDefinition[] => {
-	return STRATEGY_IDS.map((id) => strategyRegistry[id]);
+export const listStrategyDefinitions = (): AnyStrategyEntry[] => {
+	return [...registryEntries];
 };
 
 export const validateStrategyId = (value: string): StrategyId | null => {

@@ -179,6 +179,9 @@ export const ultraAggressiveModule = {
 		deps: UltraAggressiveDeps
 	) => new UltraAggressiveBtcUsdtStrategy(config, deps),
 	loadConfig: loadUltraAggressiveConfig,
+	dependencies: {
+		createCache: createUltraAggressiveCache,
+	},
 };
 
 export default ultraAggressiveModule;

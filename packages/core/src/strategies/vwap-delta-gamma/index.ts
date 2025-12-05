@@ -241,6 +241,9 @@ export const vwapDeltaGammaModule = {
 		deps: VWAPDeltaGammaStrategyDependencies
 	) => new VWAPDeltaGammaStrategy(config, deps),
 	loadConfig: loadVWAPDeltaGammaConfig,
+	dependencies: {
+		createCache: createVWAPDeltaGammaCache,
+	},
 };
 
 export default vwapDeltaGammaModule;

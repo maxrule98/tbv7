@@ -11,7 +11,9 @@
 		"build:server": "pnpm --workspace-concurrency=1 --filter @agenai/trader-server... run build",
 		"start:server": "pnpm --filter @agenai/trader-server run start",
 		"lint": "pnpm -r run lint",
-		"test": "pnpm -r run test"
+		"test": "pnpm -r run test",
+		"validate:strategies": "ts-node packages/core/src/strategies/validateStrategyStructure.ts",
+		"check": "pnpm run lint && pnpm run test && pnpm run validate:strategies"
 	},
 	"devDependencies": {
 		"@types/node": "^20.11.30",
