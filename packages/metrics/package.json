@@ -1,0 +1,17 @@
+{
+	"name": "@agenai/metrics",
+	"version": "0.1.0",
+	"private": true,
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"start": "ts-node src/metricsRunner.ts",
+		"lint": "eslint 'src/**/*.ts'",
+		"test": "vitest run --passWithNoTests"
+	},
+	"dependencies": {
+		"@agenai/core": "workspace:*",
+		"@agenai/trader-runtime": "workspace:*"
+	}
+}

@@ -9,7 +9,7 @@
 		"test": "pnpm run validate:strategies && pnpm -r run test",
 		"lint": "pnpm -r run lint",
 		"backtest": "pnpm --filter @agenai/backtester-cli run dev --",
-		"metrics:process": "ts-node scripts/processBacktestMetrics.ts",
+		"metrics:process": "pnpm --filter @agenai/metrics run start",
 		"strategy:list": "ts-node packages/core/src/strategies/listStrategies.ts",
 		"validate:strategies": "ts-node packages/core/src/strategies/validateStrategyStructure.ts",
 		"clean": "pnpm -r exec -- rm -rf dist build .turbo && rm -rf output/",
