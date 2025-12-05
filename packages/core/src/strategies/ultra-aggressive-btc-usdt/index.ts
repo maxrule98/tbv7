@@ -14,9 +14,11 @@ import {
 	ultraAggressiveManifest,
 } from "./config";
 import {
+	RiskControlState,
 	StrategyContextSnapshot,
 	buildStrategyContext,
 	selectEntryDecision,
+	evaluateRiskBlocks,
 } from "./entryLogic";
 import { evaluateExitDecision, PositionMemoryState } from "./exitLogic";
 import { UltraAggressiveMetrics } from "./metrics";
@@ -24,6 +26,12 @@ import { UltraAggressiveMetrics } from "./metrics";
 export class UltraAggressiveBtcUsdtStrategy {
 	private positionMemory: PositionMemoryState | null = null;
 	private readonly metrics = new UltraAggressiveMetrics();
+	private cooldownBarsRemaining = 0;
+	private lastExitReason: string | null = null;
+	private lastRealizedPnLPct: number | null = null;
+	private sessionDate: string | null = null;
+	private sessionPnLPct = 0;
+	private lastContextTimestamp: number | null = null;
 
 	constructor(
 		private readonly config: UltraAggressiveBtcUsdtConfig,
@@ -44,32 +52,33 @@ export class UltraAggressiveBtcUsdtStrategy {
 			return this.noAction("insufficient_candles", executionCandles);
 		}
 
+		const latest = executionCandles[executionCandles.length - 1];
+		this.syncPositionWithRuntime(position, latest);
+		this.handleNewTimestamp(latest.timestamp);
+		this.ensureSessionDate(latest.timestamp);
 		const ctx = buildStrategyContext(
 			executionCandles,
 			confirmingCandles,
 			contextCandles,
-			this.config
+			this.config,
+			this.getRiskControlState()
 		);
 
 		this.metrics.emitContext(ctx);
 		this.metrics.emitDiagnostics(ctx);
 
-		const latest = executionCandles[executionCandles.length - 1];
-		if (position !== this.positionMemory?.side) {
-			if (position === "FLAT") {
-				this.positionMemory = null;
-			} else {
-				this.positionMemory = {
-					side: position,
-					openedAt: latest.timestamp,
-					entryPrice: latest.close,
-					stop: null,
-				};
-			}
+		const atrSnapshot = ctx.indicator.atr1m ?? null;
+		if (this.positionMemory && this.positionMemory.atrOnEntry === null) {
+			this.positionMemory.atrOnEntry = atrSnapshot;
 		}
+		this.updateFavorablePrice(latest.close);
 
 		if (position === "FLAT") {
-			const entryDecision = selectEntryDecision(ctx, this.config.risk);
+			const blockReason = evaluateRiskBlocks(ctx, this.config);
+			if (blockReason) {
+				return this.noAction(blockReason, executionCandles);
+			}
+			const entryDecision = selectEntryDecision(ctx, this.config);
 			if (!entryDecision) {
 				return this.noAction("no_signal", executionCandles);
 			}
@@ -78,6 +87,8 @@ export class UltraAggressiveBtcUsdtStrategy {
 				openedAt: latest.timestamp,
 				entryPrice: latest.close,
 				stop: entryDecision.stop,
+				atrOnEntry: atrSnapshot,
+				bestFavorablePrice: latest.close,
 			};
 			this.metrics.emitEntry(ctx, entryDecision);
 			return this.buildIntent(latest, entryDecision);
@@ -90,8 +101,9 @@ export class UltraAggressiveBtcUsdtStrategy {
 			this.positionMemory
 		);
 		if (exitResult.intent) {
-			this.metrics.emitExit(ctx, position, exitResult.reason ?? "exit");
-			this.positionMemory = null;
+			const exitReason = exitResult.reason ?? "exit";
+			this.metrics.emitExit(ctx, position, exitReason);
+			this.recordExitStats(exitReason, ctx.timestamp, ctx.price);
 			return exitResult.intent;
 		}
 
@@ -131,6 +143,113 @@ export class UltraAggressiveBtcUsdtStrategy {
 			reason,
 			timestamp: latest?.timestamp,
 		};
+	}
+
+	private syncPositionWithRuntime(
+		position: PositionSide,
+		latest: Candle
+	): void {
+		if (position === this.positionMemory?.side) {
+			return;
+		}
+		if (position === "FLAT") {
+			if (this.positionMemory) {
+				this.recordExitStats("external_exit", latest.timestamp, latest.close);
+			}
+			this.positionMemory = null;
+			return;
+		}
+		this.positionMemory = {
+			side: position,
+			openedAt: latest.timestamp,
+			entryPrice: latest.close,
+			stop: null,
+			atrOnEntry: null,
+			bestFavorablePrice: latest.close,
+		};
+	}
+
+	private handleNewTimestamp(timestamp: number): void {
+		if (
+			this.lastContextTimestamp !== null &&
+			timestamp <= this.lastContextTimestamp
+		) {
+			return;
+		}
+		this.lastContextTimestamp = timestamp;
+		if (this.cooldownBarsRemaining > 0) {
+			this.cooldownBarsRemaining = Math.max(0, this.cooldownBarsRemaining - 1);
+		}
+	}
+
+	private ensureSessionDate(timestamp: number): void {
+		const dayKey = new Date(timestamp).toISOString().slice(0, 10);
+		if (this.sessionDate === dayKey) {
+			return;
+		}
+		this.sessionDate = dayKey;
+		this.sessionPnLPct = 0;
+	}
+
+	private getRiskControlState(): RiskControlState {
+		return {
+			lastExitReason: this.lastExitReason,
+			lastRealizedPnLPct: this.lastRealizedPnLPct,
+			cooldownBarsRemaining: this.cooldownBarsRemaining,
+			sessionPnLPct: this.sessionPnLPct,
+		};
+	}
+
+	private updateFavorablePrice(price: number): void {
+		if (!this.positionMemory) {
+			return;
+		}
+		if (this.positionMemory.side === "LONG") {
+			this.positionMemory.bestFavorablePrice = Math.max(
+				this.positionMemory.bestFavorablePrice,
+				price
+			);
+			return;
+		}
+		this.positionMemory.bestFavorablePrice = Math.min(
+			this.positionMemory.bestFavorablePrice,
+			price
+		);
+	}
+
+	private recordExitStats(
+		reason: string,
+		timestamp: number,
+		exitPrice: number
+	): void {
+		if (!this.positionMemory) {
+			this.lastExitReason = reason;
+			this.lastRealizedPnLPct = null;
+			return;
+		}
+		this.ensureSessionDate(timestamp);
+		const pnlPct = this.computePnLPct(exitPrice, this.positionMemory);
+		this.lastExitReason = reason;
+		this.lastRealizedPnLPct = pnlPct;
+		this.sessionPnLPct += pnlPct;
+		if (
+			reason === "perTradeDrawdown" &&
+			this.config.cooldownAfterStopoutBars > 0
+		) {
+			this.cooldownBarsRemaining = this.config.cooldownAfterStopoutBars;
+		}
+		this.positionMemory = null;
+	}
+
+	private computePnLPct(price: number, memory: PositionMemoryState): number {
+		if (memory.entryPrice === 0) {
+			return 0;
+		}
+		const raw =
+			memory.side === "LONG"
+				? (price - memory.entryPrice) / memory.entryPrice
+				: (memory.entryPrice - price) / memory.entryPrice;
+		return Number(raw.toFixed(6));
 	}
 }
 

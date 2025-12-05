@@ -8,6 +8,7 @@ import { Candle, TradeIntent } from "../../types";
 import {
 	UltraAggressiveBtcUsdtConfig,
 	UltraAggressiveRiskConfig,
+	UltraAggressivePlayType,
 } from "./config";
 
 export type TrendDirection = "TrendingUp" | "TrendingDown" | "Ranging";
@@ -20,6 +21,7 @@ export interface IndicatorSnapshot {
 	emaFast: number | null;
 	emaSlow: number | null;
 	rsi: number | null;
+	previousClose: number | null;
 	vwap: number | null;
 	vwapDeviationPct: number | null;
 	cvdSeries: number[];
@@ -59,6 +61,13 @@ export interface SetupDiagnosticsEntry {
 	checks: Record<string, boolean | number | string | null>;
 }
 
+export interface RiskControlState {
+	lastExitReason: string | null;
+	lastRealizedPnLPct: number | null;
+	cooldownBarsRemaining: number;
+	sessionPnLPct: number;
+}
+
 export interface StrategyContextSnapshot {
 	symbol: string;
 	timeframe: string;
@@ -70,6 +79,8 @@ export interface StrategyContextSnapshot {
 	levels: LevelSnapshot;
 	setups: StrategySetups;
 	setupDiagnostics: SetupDiagnosticsEntry[];
+	recentExecutionCandles: Candle[];
+	riskState: RiskControlState | null;
 }
 
 export interface SetupEvaluationResult {
@@ -86,11 +97,19 @@ export interface SetupDecision {
 	confidence: number;
 }
 
+const DEFAULT_PLAYTYPE_PRIORITY: UltraAggressivePlayType[] = [
+	"liquiditySweep",
+	"breakoutTrap",
+	"breakout",
+	"meanReversion",
+];
+
 export const buildStrategyContext = (
 	executionCandles: Candle[],
 	confirmingCandles: Candle[],
 	contextCandles: Candle[],
-	config: UltraAggressiveBtcUsdtConfig
+	config: UltraAggressiveBtcUsdtConfig,
+	riskState?: RiskControlState
 ): StrategyContextSnapshot => {
 	const latest = executionCandles[executionCandles.length - 1];
 	const indicator = computeIndicators(
@@ -117,6 +136,11 @@ export const buildStrategyContext = (
 		latest,
 		config
 	);
+	const recentWindow = Math.min(
+		Math.max(Math.floor(config.lookbacks.executionBars * 0.2), 5),
+		50
+	);
+	const recentExecutionCandles = executionCandles.slice(-recentWindow);
 	return {
 		symbol: latest.symbol,
 		timeframe: latest.timeframe,
@@ -128,40 +152,112 @@ export const buildStrategyContext = (
 		levels,
 		setups,
 		setupDiagnostics: diagnostics,
+		recentExecutionCandles,
+		riskState: riskState ?? null,
 	};
 };
 
 export const selectEntryDecision = (
 	ctx: StrategyContextSnapshot,
-	risk: UltraAggressiveRiskConfig
+	config: UltraAggressiveBtcUsdtConfig
 ): SetupDecision | null => {
-	const pipeline: (SetupDecision | null)[] = [
-		ctx.setups.trendIgnitionLong
-			? buildSetupDecision(ctx, "OPEN_LONG", "trend_ignition_long", risk)
-			: null,
-		ctx.setups.trendIgnitionShort
-			? buildSetupDecision(ctx, "OPEN_SHORT", "trend_ignition_short", risk)
-			: null,
-		ctx.setups.liquiditySweepLong
-			? buildSetupDecision(ctx, "OPEN_LONG", "liquidity_sweep_long", risk)
-			: null,
-		ctx.setups.liquiditySweepShort
-			? buildSetupDecision(ctx, "OPEN_SHORT", "liquidity_sweep_short", risk)
-			: null,
-		ctx.setups.breakoutTrapShort
-			? buildSetupDecision(ctx, "OPEN_SHORT", "breakout_trap_short", risk)
-			: null,
-		ctx.setups.breakoutTrapLong
-			? buildSetupDecision(ctx, "OPEN_LONG", "breakout_trap_long", risk)
-			: null,
-		ctx.setups.meanReversionShort
-			? buildSetupDecision(ctx, "OPEN_SHORT", "mean_reversion_short", risk)
-			: null,
-		ctx.setups.meanReversionLong
-			? buildSetupDecision(ctx, "OPEN_LONG", "mean_reversion_long", risk)
-			: null,
-	];
-	return pipeline.find((decision) => decision !== null) ?? null;
+	const priority = config.playTypePriority?.length
+		? config.playTypePriority
+		: DEFAULT_PLAYTYPE_PRIORITY;
+	const candidates: Array<{
+		decision: SetupDecision;
+		priorityIndex: number;
+	}> = [];
+
+	const pushDecision = (
+		active: boolean,
+		intent: SetupDecision["intent"],
+		reason: string,
+		priorityIndex: number
+	): void => {
+		if (!active) {
+			return;
+		}
+		candidates.push({
+			decision: buildSetupDecision(ctx, intent, reason, config.risk),
+			priorityIndex,
+		});
+	};
+
+	priority.forEach((playType, priorityIndex) => {
+		switch (playType) {
+			case "liquiditySweep":
+				pushDecision(
+					ctx.setups.liquiditySweepLong,
+					"OPEN_LONG",
+					"liquidity_sweep_long",
+					priorityIndex
+				);
+				pushDecision(
+					ctx.setups.liquiditySweepShort,
+					"OPEN_SHORT",
+					"liquidity_sweep_short",
+					priorityIndex
+				);
+				break;
+			case "breakoutTrap":
+				pushDecision(
+					ctx.setups.breakoutTrapLong,
+					"OPEN_LONG",
+					"breakout_trap_long",
+					priorityIndex
+				);
+				pushDecision(
+					ctx.setups.breakoutTrapShort,
+					"OPEN_SHORT",
+					"breakout_trap_short",
+					priorityIndex
+				);
+				break;
+			case "breakout":
+				pushDecision(
+					ctx.setups.trendIgnitionLong,
+					"OPEN_LONG",
+					"trend_ignition_long",
+					priorityIndex
+				);
+				pushDecision(
+					ctx.setups.trendIgnitionShort,
+					"OPEN_SHORT",
+					"trend_ignition_short",
+					priorityIndex
+				);
+				break;
+			case "meanReversion":
+			default:
+				pushDecision(
+					ctx.setups.meanReversionLong,
+					"OPEN_LONG",
+					"mean_reversion_long",
+					priorityIndex
+				);
+				pushDecision(
+					ctx.setups.meanReversionShort,
+					"OPEN_SHORT",
+					"mean_reversion_short",
+					priorityIndex
+				);
+				break;
+		}
+	});
+
+	if (!candidates.length) {
+		return null;
+	}
+
+	candidates.sort((a, b) => {
+		if (a.priorityIndex !== b.priorityIndex) {
+			return a.priorityIndex - b.priorityIndex;
+		}
+		return b.decision.confidence - a.decision.confidence;
+	});
+
+	return candidates[0]?.decision ?? null;
 };
 
 const computeIndicators = (
@@ -177,6 +273,7 @@ const computeIndicators = (
 	const emaFast = ema(closes, config.emaFastPeriod);
 	const emaSlow = ema(closes, config.emaSlowPeriod);
 	const rsi = calculateRSI(closes, config.rsiPeriod);
+	const previousClose = closes.length > 1 ? closes[closes.length - 2] : null;
 	const volumeAvgShort = averageVolumeFromCandles(
 		executionCandles,
 		Math.min(20, executionCandles.length)
@@ -202,6 +299,7 @@ const computeIndicators = (
 		emaFast,
 		emaSlow,
 		rsi,
+		previousClose,
 		vwap,
 		vwapDeviationPct,
 		cvdSeries,
@@ -368,6 +466,26 @@ const buildSetupDecision = (
 		tp2,
 		confidence,
 	};
+};
+
+export const evaluateRiskBlocks = (
+	ctx: StrategyContextSnapshot,
+	config: UltraAggressiveBtcUsdtConfig
+): string | null => {
+	const state = ctx.riskState;
+	if (!state) {
+		return null;
+	}
+	if (config.cooldownAfterStopoutBars > 0 && state.cooldownBarsRemaining > 0) {
+		return "cooldownBlock";
+	}
+	if (
+		config.dailyDrawdownLimitPct > 0 &&
+		state.sessionPnLPct <= -config.dailyDrawdownLimitPct
+	) {
+		return "drawdownLimit";
+	}
+	return null;
 };
 
 const classifyTrendDirection = (
@@ -537,16 +655,31 @@ const detectTrendIgnition = (
 	const cvdOk =
 		indicator.cvdTrend === (isLong ? "up" : "down") &&
 		indicator.cvdDivergence !== (isLong ? "bearish" : "bullish");
+	const prevClose = indicator.previousClose;
+	const priorBreakout = !!breakoutRef
+		? prevClose !== null
+			? isLong
+				? prevClose > breakoutRef * 1.001
+				: prevClose < breakoutRef * 0.999
+			: false
+		: false;
+	const breakoutConfirmed = breakout && priorBreakout;
+	const rsi = indicator.rsi;
+	const breakoutOverride =
+		config.allowBreakoutsWhenRSIOverbought &&
+		rsi !== null &&
+		((isLong && rsi >= config.thresholds.rsiOverbought) ||
+			(!isLong && rsi <= config.thresholds.rsiOversold)) &&
+		highVolume &&
+		cvdOk;
 	const active =
 		trending &&
 		volOk &&
 		hasVwap &&
-		priceAlignment &&
 		!!breakoutRef &&
-		breakout &&
-		wideBody &&
-		highVolume &&
-		cvdOk;
+		cvdOk &&
+		((priceAlignment && breakoutConfirmed && wideBody && highVolume) ||
+			breakoutOverride);
 	return {
 		name: `trendIgnition${isLong ? "Long" : "Short"}`,
 		side,
@@ -559,9 +692,13 @@ const detectTrendIgnition = (
 			priceAlignment,
 			breakoutRef: breakoutRef ?? null,
 			breakout,
+			priorBreakout,
+			breakoutConfirmed,
 			wideBody,
 			highVolume,
 			cvdOk,
+			rsi,
+			breakoutOverride,
 		},
 	};
 };
@@ -585,8 +722,8 @@ const detectMeanReversion = (
 			: stretchPct < -config.thresholds.vwapStretchPct;
 	const anchor =
 		side === "short"
-			? levels.dayHigh ?? levels.rangeHigh
-			: levels.dayLow ?? levels.rangeLow;
+			? (levels.dayHigh ?? levels.rangeHigh)
+			: (levels.dayLow ?? levels.rangeLow);
 	const proximity = config.thresholds.vwapStretchPct;
 	const nearExtreme =
 		anchor !== null
@@ -608,14 +745,18 @@ const detectMeanReversion = (
 			atr * config.thresholds.meanRevStretchAtr;
 	const divergence =
 		indicator.cvdDivergence === (side === "short" ? "bearish" : "bullish");
+	const reversionSignalCount = [overExtended, rsiCondition, divergence].filter(
+		(flag) => flag
+	).length;
+	const reversionSignalsOk = config.reversionNeedsTwoOfThreeConditions
+		? reversionSignalCount >= 2
+		: overExtended && rsiCondition && divergence;
 	const active =
 		trendFilterOk &&
-		overExtended &&
+		reversionSignalsOk &&
 		anchor !== null &&
 		nearExtreme &&
-		rsiCondition &&
-		impulse &&
-		divergence;
+		impulse;
 	return {
 		name: `meanReversion${side === "long" ? "Long" : "Short"}`,
 		side,
@@ -631,6 +772,8 @@ const detectMeanReversion = (
 			atr,
 			impulse,
 			divergence,
+			reversionSignalCount,
+			reversionSignalsOk,
 		},
 	};
 };
@@ -646,8 +789,8 @@ const detectBreakoutTrap = (
 	const isLong = side === "long";
 	const rangeContext = trendDirection === "Ranging";
 	const keyLevel = isLong
-		? levels.rangeLow ?? levels.previousDayLow ?? levels.dayLow
-		: levels.rangeHigh ?? levels.previousDayHigh ?? levels.dayHigh;
+		? (levels.rangeLow ?? levels.previousDayLow ?? levels.dayLow)
+		: (levels.rangeHigh ?? levels.previousDayHigh ?? levels.dayHigh);
 	const proximity = config.thresholds.vwapStretchPct;
 
 	const overshoot = isLong
@@ -663,13 +806,26 @@ const detectBreakoutTrap = (
 	const orderFlowReject = isLong
 		? indicator.cvdDivergence === "bullish" || indicator.cvdTrend === "up"
 		: indicator.cvdDivergence === "bearish" || indicator.cvdTrend === "down";
-	const active =
-		rangeContext &&
+	const wickReclaim = overshoot && reEntry;
+	const vwapFlat =
+		indicator.vwap === null ||
+		Math.abs(indicator.vwapDeviationPct ?? 0) <=
+			config.thresholds.vwapStretchPct * 0.5;
+	const trapOverride =
+		!rangeContext &&
 		keyLevel !== null &&
-		overshoot &&
-		reEntry &&
+		wickReclaim &&
 		volumeControlled &&
-		orderFlowReject;
+		orderFlowReject &&
+		vwapFlat;
+	const active =
+		(rangeContext &&
+			keyLevel !== null &&
+			overshoot &&
+			reEntry &&
+			volumeControlled &&
+			orderFlowReject) ||
+		trapOverride;
 	return {
 		name: `breakoutTrap${isLong ? "Long" : "Short"}`,
 		side,
@@ -681,6 +837,8 @@ const detectBreakoutTrap = (
 			reEntry,
 			volumeControlled,
 			orderFlowReject,
+			vwapFlat,
+			trapOverride,
 		},
 	};
 };
@@ -694,8 +852,8 @@ const detectLiquiditySweep = (
 ): SetupDiagnosticsEntry => {
 	const isLong = side === "long";
 	const referenceLevel = isLong
-		? levels.recentSwingLow ?? levels.dayLow ?? levels.previousDayLow
-		: levels.recentSwingHigh ?? levels.dayHigh ?? levels.previousDayHigh;
+		? (levels.recentSwingLow ?? levels.dayLow ?? levels.previousDayLow)
+		: (levels.recentSwingHigh ?? levels.dayHigh ?? levels.previousDayHigh);
 	const atr = indicator.atr1m ?? 0;
 	const wickSize = referenceLevel
 		? isLong
@@ -712,10 +870,18 @@ const detectLiquiditySweep = (
 			? latest.close > referenceLevel
 			: latest.close < referenceLevel
 		: false;
-	const divergence =
+	const vwapDeviation = indicator.vwapDeviationPct ?? 0;
+	const vwapFlat =
+		indicator.vwap === null ||
+		Math.abs(vwapDeviation) <= config.thresholds.vwapStretchPct * 0.5;
+	const divergenceMatch =
 		indicator.cvdDivergence === (isLong ? "bullish" : "bearish");
+	const flowConfirmed =
+		divergenceMatch || indicator.cvdTrend === (isLong ? "up" : "down");
+	const divergenceOk =
+		flowConfirmed && (divergenceMatch || (vwapFlat && reclaimed));
 	const active =
-		referenceLevel !== null && wickLarge && reclaimed && divergence;
+		referenceLevel !== null && wickLarge && reclaimed && divergenceOk;
 	return {
 		name: `liquiditySweep${isLong ? "Long" : "Short"}`,
 		side,
@@ -726,7 +892,9 @@ const detectLiquiditySweep = (
 			wickSize,
 			wickLarge,
 			reclaimed,
-			divergence,
+			divergence: divergenceMatch,
+			flowConfirmed,
+			vwapFlat,
 		},
 	};
 };

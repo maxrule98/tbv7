@@ -3,6 +3,12 @@ import { StrategyId } from "../ids";
 
 export const ULTRA_AGGRESSIVE_ID: StrategyId = "ultra_aggressive_btc_usdt";
 
+export type UltraAggressivePlayType =
+	| "liquiditySweep"
+	| "breakoutTrap"
+	| "breakout"
+	| "meanReversion";
+
 export interface UltraAggressiveRiskConfig {
 	riskPerTradePct: number;
 	atrStopMultiple: number;
@@ -40,6 +46,7 @@ export interface UltraAggressiveBtcUsdtConfig {
 		confirming: string;
 		context: string;
 	};
+	playTypePriority: UltraAggressivePlayType[];
 	cacheTTLms: number;
 	atrPeriod1m: number;
 	atrPeriod5m: number;
@@ -50,6 +57,12 @@ export interface UltraAggressiveBtcUsdtConfig {
 	thresholds: UltraAggressiveThresholds;
 	risk: UltraAggressiveRiskConfig;
 	maxTradeDurationMinutes: number;
+	enableVolatilityFadeExit: boolean;
+	allowBreakoutsWhenRSIOverbought: boolean;
+	reversionNeedsTwoOfThreeConditions: boolean;
+	maxDrawdownPerTradePct: number;
+	cooldownAfterStopoutBars: number;
+	dailyDrawdownLimitPct: number;
 }
 
 export interface UltraAggressiveDeps {
@@ -62,6 +75,8 @@ export interface UltraAggressiveRiskRulesSummary {
 	partialTakeProfitRR: number;
 	finalTakeProfitRR: number;
 	trailingAtrMultiple: number;
+	maxDrawdownPerTradePct: number;
+	dailyDrawdownLimitPct: number;
 }
 
 export interface UltraAggressiveStrategyManifest {
@@ -84,8 +99,10 @@ export const ultraAggressiveManifest: UltraAggressiveStrategyManifest = {
 	riskRules: {
 		maxTradeDurationMinutes: 90,
 		stopLossAtrMultiple: 1.2,
-		partialTakeProfitRR: 0.8,
-		finalTakeProfitRR: 2.2,
+		partialTakeProfitRR: 0.5,
+		finalTakeProfitRR: 1.2,
 		trailingAtrMultiple: 1.1,
+		maxDrawdownPerTradePct: 0.0125,
+		dailyDrawdownLimitPct: 0.03,
 	},
 };

@@ -25,6 +25,7 @@ export class UltraAggressiveMetrics {
 			cvdDivergence: snapshot.indicator.cvdDivergence,
 			levels: snapshot.levels,
 			setups: snapshot.setups,
+			riskState: snapshot.riskState,
 		});
 	}
 
@@ -85,6 +86,8 @@ export class UltraAggressiveMetrics {
 			side,
 			price: snapshot.price,
 			timestamp: new Date(snapshot.timestamp).toISOString(),
+			trend: snapshot.trendDirection,
+			volatility: snapshot.volRegime,
 		});
 	}
 }
