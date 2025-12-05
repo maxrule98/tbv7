@@ -95,13 +95,18 @@ export const runBacktest = async (
 		throw new Error("Backtest startTimestamp must be before endTimestamp");
 	}
 
+	const strategyProfileForLoad = resolveStrategyProfileName(
+		backtestConfig.strategyId,
+		options.strategyProfile
+	);
+
 	const agenaiConfig =
 		options.agenaiConfig ??
 		loadAgenaiConfig({
 			envPath: options.envPath,
 			configDir: options.configDir,
 			exchangeProfile: options.exchangeProfile,
-			strategyProfile: options.strategyProfile,
+			strategyProfile: strategyProfileForLoad,
 			riskProfile: options.riskProfile,
 		});
 
@@ -110,10 +115,7 @@ export const runBacktest = async (
 			requestedStrategy: backtestConfig.strategyId,
 			loadedStrategy: agenaiConfig.strategy.id,
 		});
-		const fallbackProfile = resolveStrategyProfileName(
-			backtestConfig.strategyId,
-			options.strategyProfile
-		);
+		const fallbackProfile = strategyProfileForLoad;
 		try {
 			const reloadedStrategy = loadStrategyConfig(
 				options.configDir,
@@ -189,7 +191,7 @@ export const runBacktest = async (
 				backtestConfig,
 				trackedTimeframes,
 				warmupByTimeframe
-		  );
+			);
 
 	const cache = new BacktestTimeframeCache({
 		timeframes: trackedTimeframes,
@@ -213,7 +215,7 @@ export const runBacktest = async (
 				backtestConfig.strategyId,
 				agenaiConfig.strategy,
 				cache
-		  );
+			);
 
 	logStrategyLoaded({
 		source: strategySource,
@@ -231,7 +233,7 @@ export const runBacktest = async (
 		builderName: strategySource === "builder" ? "backtest_strategy" : undefined,
 		profiles: {
 			account: options.accountProfile,
-			strategy: options.strategyProfile,
+			strategy: strategyProfileForLoad,
 			risk: options.riskProfile,
 			exchange: options.exchangeProfile,
 		},
@@ -687,10 +689,10 @@ const recordTrade = (
 		quantity: result.quantity,
 		entryPrice:
 			plan.action === "OPEN"
-				? result.price ?? candle.close
-				: priorPosition.avgEntryPrice ?? result.price ?? candle.close,
+				? (result.price ?? candle.close)
+				: (priorPosition.avgEntryPrice ?? result.price ?? candle.close),
 		exitPrice:
-			plan.action === "CLOSE" ? result.price ?? candle.close : undefined,
+			plan.action === "CLOSE" ? (result.price ?? candle.close) : undefined,
 		realizedPnl: plan.action === "CLOSE" ? result.realizedPnl : undefined,
 		timestamp: candle.timestamp,
 	};

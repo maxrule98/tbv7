@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import process from "node:process";
-import { StrategyId, loadAgenaiConfig } from "@agenai/core";
+import { StrategyId, loadAgenaiConfig, loadStrategyConfig } from "@agenai/core";
 import { BacktestConfig, runBacktest } from "@agenai/trader-runtime";
 
 type ArgValue = string | boolean;
@@ -90,6 +90,18 @@ const formatUsd = (value: number | undefined): string => {
 	return typeof value === "number" ? `$${value.toFixed(2)}` : "n/a";
 };
 
+const resolveStrategyProfile = (
+	strategyId: StrategyId,
+	override?: string
+): string => {
+	if (override) {
+		return override;
+	}
+	return strategyId === "ultra_aggressive_btc_usdt"
+		? "ultra-aggressive-btc-usdt"
+		: "vwap-delta-gamma";
+};
+
 const main = async (): Promise<void> => {
 	const argMap = parseCliArgs(process.argv.slice(2));
 	if (argMap.help) {
@@ -123,8 +135,16 @@ const main = async (): Promise<void> => {
 		(argMap.symbol as string) ?? agenaiConfig.exchange.defaultSymbol;
 	const timeframe =
 		(argMap.timeframe as string) ?? agenaiConfig.env.defaultTimeframe;
-	const strategyId =
+	const requestedStrategyId =
 		(argMap.strategyId as string as StrategyId) ?? agenaiConfig.strategy.id;
+	const strategyProfile = resolveStrategyProfile(
+		requestedStrategyId,
+		profiles.strategyProfile
+	);
+
+	if (agenaiConfig.strategy.id !== requestedStrategyId) {
+		agenaiConfig.strategy = loadStrategyConfig(undefined, strategyProfile);
+	}
 	const maxCandles = parseNumber(argMap.maxCandles as string, "maxCandles");
 	const initialBalance = parseNumber(
 		argMap.initialBalance as string,
@@ -134,20 +154,22 @@ const main = async (): Promise<void> => {
 	const backtestConfig: BacktestConfig = {
 		symbol,
 		timeframe,
-		strategyId,
+		strategyId: requestedStrategyId,
 		startTimestamp,
 		endTimestamp,
 		maxCandles,
 		initialBalance,
 	};
 
-	console.log(`Running backtest for ${symbol} ${timeframe} (${strategyId})...`);
+	console.log(
+		`Running backtest for ${symbol} ${timeframe} (${requestedStrategyId})...`
+	);
 	const result = await runBacktest(backtestConfig, {
 		agenaiConfig,
 		accountProfile: profiles.accountProfile,
 		configDir,
 		envPath,
-		strategyProfile: profiles.strategyProfile,
+		strategyProfile,
 		riskProfile: profiles.riskProfile,
 		exchangeProfile: profiles.exchangeProfile,
 	});
@@ -170,7 +192,7 @@ const main = async (): Promise<void> => {
 			{
 				symbol,
 				timeframe,
-				strategyId,
+				strategyId: requestedStrategyId,
 				start: new Date(startTimestamp).toISOString(),
 				end: new Date(endTimestamp).toISOString(),
 				trades,
