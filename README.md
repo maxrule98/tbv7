@@ -197,6 +197,10 @@ Quick reference for the unified workspace scripts:
 | `pnpm validate:strategies`                             | Standalone structural validation for per-strategy folders.                  |
 | `pnpm clean`                                           | Remove build artifacts across packages and the `output/` folder.            |
 | `pnpm format`                                          | Format the entire repo with Prettier.                                       |
+| `pnpm trader:build`                                    | Compile the `@agenai/trader-cli` worker for production usage.               |
+| `pnpm trader:start`                                    | Run the compiled trader worker (expects `trader:build` first).              |
+| `pnpm server:build`                                    | Build the `@agenai/trader-server` HTTP entrypoint.                          |
+| `pnpm server:start`                                    | Start the compiled trader server in production mode.                        |
 
 ---
 
