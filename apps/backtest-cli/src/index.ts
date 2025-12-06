@@ -5,7 +5,14 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import process from "node:process";
-import { StrategyId, loadAgenaiConfig, loadStrategyConfig } from "@agenai/core";
+import {
+	StrategyConfig,
+	StrategyId,
+	assertStrategyRuntimeParams,
+	loadAgenaiConfig,
+	loadStrategyConfig,
+	resolveStrategyProfileName,
+} from "@agenai/core";
 import { BacktestConfig, runBacktest } from "@agenai/trader-runtime";
 
 type ArgValue = string | boolean;
@@ -112,18 +119,6 @@ const formatUsd = (value: number | undefined): string => {
 	return typeof value === "number" ? `$${value.toFixed(2)}` : "n/a";
 };
 
-const resolveStrategyProfile = (
-	strategyId: StrategyId,
-	override?: string
-): string => {
-	if (override) {
-		return override;
-	}
-	return strategyId === "ultra_aggressive_btc_usdt"
-		? "ultra-aggressive-btc-usdt"
-		: "vwap-delta-gamma";
-};
-
 const persistBacktestResult = (
 	result: BacktestResultPayload,
 	context: PersistContext
@@ -209,13 +204,9 @@ const main = async (): Promise<void> => {
 		riskProfile: profiles.riskProfile,
 		exchangeProfile: profiles.exchangeProfile,
 	});
-	const symbol =
-		(argMap.symbol as string) ?? agenaiConfig.exchange.defaultSymbol;
-	const timeframe =
-		(argMap.timeframe as string) ?? agenaiConfig.env.defaultTimeframe;
 	const requestedStrategyId =
 		(argMap.strategyId as string as StrategyId) ?? agenaiConfig.strategy.id;
-	const strategyProfile = resolveStrategyProfile(
+	const strategyProfile = resolveStrategyProfileName(
 		requestedStrategyId,
 		profiles.strategyProfile
 	);
@@ -223,6 +214,11 @@ const main = async (): Promise<void> => {
 	if (agenaiConfig.strategy.id !== requestedStrategyId) {
 		agenaiConfig.strategy = loadStrategyConfig(undefined, strategyProfile);
 	}
+	const strategyConfig = agenaiConfig.strategy as StrategyConfig;
+	const runtimeParams = assertStrategyRuntimeParams(strategyConfig);
+	const symbol = (argMap.symbol as string) ?? runtimeParams.symbol;
+	const timeframe =
+		(argMap.timeframe as string) ?? runtimeParams.executionTimeframe;
 	const maxCandles = parseNumber(argMap.maxCandles as string, "maxCandles");
 	const initialBalance = parseNumber(
 		argMap.initialBalance as string,

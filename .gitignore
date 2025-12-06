@@ -19,3 +19,8 @@ build
 !/jest.config.js
 !/vitest.config.js
 !/*.config.js
+
+# Ignore summary.json, trades.csv, stats.json, equity.csv, and logs.txt files in backtests
+**.summary.json
+**/metrics/**/**.csv
+**/backtests/**/**.json

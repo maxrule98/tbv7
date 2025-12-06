@@ -2,14 +2,20 @@ import { StrategyId } from "@agenai/core";
 import { PaperAccountSnapshot } from "@agenai/execution-engine";
 
 export interface BacktestConfig {
-	symbol: string;
-	timeframe: string;
-	strategyId: StrategyId;
+	symbol?: string;
+	timeframe?: string;
+	strategyId?: StrategyId;
 	useTestnet?: boolean;
 	startTimestamp: number;
 	endTimestamp: number;
 	maxCandles?: number;
 	initialBalance?: number;
+}
+
+export interface BacktestResolvedConfig extends BacktestConfig {
+	symbol: string;
+	timeframe: string;
+	strategyId: StrategyId;
 }
 
 export type BacktestTradeAction = "OPEN" | "CLOSE";
@@ -27,7 +33,7 @@ export interface BacktestTrade {
 }
 
 export interface BacktestResult {
-	config: BacktestConfig;
+	config: BacktestResolvedConfig;
 	trades: BacktestTrade[];
 	equitySnapshots: PaperAccountSnapshot[];
 }

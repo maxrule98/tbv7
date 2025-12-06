@@ -199,6 +199,34 @@ describe("runBacktest", () => {
 		);
 	});
 
+	it("falls back to strategy config symbol/timeframe when omitted", async () => {
+		const agenaiConfig = createAgenaiConfig();
+		const backtestConfig = buildBacktestConfig({
+			symbol: undefined,
+			timeframe: undefined,
+		});
+		const timeframeData = {
+			"1m": buildCandles("1m", [100, 101, 102, 103]),
+			"5m": buildCandles("5m", [100, 101], baseTimestamp, 5 * 60_000),
+			"15m": buildCandles("15m", [100, 101], baseTimestamp, 15 * 60_000),
+		};
+		const mockClient = createMockClient();
+		const strategy = scriptedStrategy([
+			{ symbol, intent: "NO_ACTION", reason: "noop" },
+		]);
+
+		const result = await runBacktest(backtestConfig, {
+			agenaiConfig,
+			accountConfig,
+			client: mockClient,
+			strategyOverride: strategy,
+			timeframeData,
+		});
+
+		expect(result.config.symbol).toBe(symbol);
+		expect(result.config.timeframe).toBe(timeframe);
+	});
+
 	it("throws when execution timeframe candles are missing", async () => {
 		const agenaiConfig = createAgenaiConfig();
 		const backtestConfig = buildBacktestConfig();

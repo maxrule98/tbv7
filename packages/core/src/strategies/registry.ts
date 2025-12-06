@@ -15,10 +15,11 @@ export interface StrategyRegistryEntry<
 	TConfig = unknown,
 	TDeps = unknown,
 	TStrategy = unknown,
-	TManifest extends StrategyManifestSummary = StrategyManifestSummary
+	TManifest extends StrategyManifestSummary = StrategyManifestSummary,
 > {
 	id: StrategyId;
 	manifest: TManifest;
+	defaultProfile: string;
 	loadConfig: (configPath?: string) => TConfig;
 	createStrategy: (config: TConfig, deps: TDeps) => TStrategy;
 	dependencies?: StrategyDependencyMetadata<TConfig, TDeps>;
@@ -43,17 +44,20 @@ const registryEntries = [
 
 const registryMap = registryEntries.reduce<
 	Record<StrategyId, AnyStrategyEntry>
->((acc, entry) => {
-	acc[entry.id] = entry;
-	return acc;
-}, {} as Record<StrategyId, AnyStrategyEntry>);
+>(
+	(acc, entry) => {
+		acc[entry.id] = entry;
+		return acc;
+	},
+	{} as Record<StrategyId, AnyStrategyEntry>
+);
 
 export const strategyRegistry: AnyStrategyEntry[] = registryEntries;
 
 export const getStrategyDefinition = <
 	TConfig = unknown,
 	TDeps = unknown,
-	TStrategy = unknown
+	TStrategy = unknown,
 >(
 	id: StrategyId
 ): StrategyRegistryEntry<TConfig, TDeps, TStrategy> => {

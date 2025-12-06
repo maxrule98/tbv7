@@ -1,6 +1,7 @@
 import {
 	StrategyConfig,
 	StrategyId,
+	assertStrategyRuntimeParams,
 	createLogger,
 	getStrategyDefinition,
 	loadAgenaiConfig,
@@ -34,13 +35,9 @@ const main = async (): Promise<void> => {
 		strategyConfig = definition.loadConfig();
 		config.strategy = strategyConfig;
 	}
-	const symbol =
-		config.env.defaultSymbol ||
-		exchange.defaultSymbol ||
-		strategyConfig.symbol ||
-		"BTC/USDT";
-	const timeframe =
-		config.env.defaultTimeframe || strategyConfig.timeframes.execution;
+	const runtimeParams = assertStrategyRuntimeParams(strategyConfig);
+	const symbol = runtimeParams.symbol;
+	const timeframe = runtimeParams.executionTimeframe;
 
 	logger.info("cli_starting", {
 		defaultStrategyId,

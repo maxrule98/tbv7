@@ -10,9 +10,11 @@ import {
 	UltraAggressiveBtcUsdtStrategy,
 	VWAPDeltaGammaConfig,
 	VWAPDeltaGammaStrategy,
+	assertStrategyRuntimeParams,
 	loadAccountConfig,
 	loadAgenaiConfig,
 	loadStrategyConfig,
+	resolveStrategyProfileName,
 } from "@agenai/core";
 import {
 	DefaultDataProvider,
@@ -51,7 +53,12 @@ import {
 } from "../runtimeShared";
 import type { TraderStrategy } from "../types";
 import { BacktestTimeframeCache } from "./BacktestTimeframeCache";
-import { BacktestConfig, BacktestResult, BacktestTrade } from "./backtestTypes";
+import {
+	BacktestConfig,
+	BacktestResolvedConfig,
+	BacktestResult,
+	BacktestTrade,
+} from "./backtestTypes";
 
 export interface RunBacktestOptions {
 	agenaiConfig?: AgenaiConfig;
@@ -70,25 +77,6 @@ export interface RunBacktestOptions {
 
 type WarmupMap = Map<string, number>;
 
-const DEFAULT_STRATEGY_PROFILES: Record<StrategyId, string> = {
-	vwap_delta_gamma: "vwap-delta-gamma",
-	ultra_aggressive_btc_usdt: "ultra-aggressive-btc-usdt",
-};
-
-const resolveStrategyProfileName = (
-	strategyId: StrategyId,
-	overrideProfile?: string
-): string => {
-	if (overrideProfile) {
-		return overrideProfile;
-	}
-	const profile = DEFAULT_STRATEGY_PROFILES[strategyId];
-	if (!profile) {
-		throw new Error(`No default strategy profile mapped for ${strategyId}`);
-	}
-	return profile;
-};
-
 export const runBacktest = async (
 	backtestConfig: BacktestConfig,
 	options: RunBacktestOptions = {}
@@ -97,24 +85,26 @@ export const runBacktest = async (
 		throw new Error("Backtest startTimestamp must be before endTimestamp");
 	}
 
-	const strategyProfileForLoad = resolveStrategyProfileName(
-		backtestConfig.strategyId,
-		options.strategyProfile
-	);
-
 	const agenaiConfig =
 		options.agenaiConfig ??
 		loadAgenaiConfig({
 			envPath: options.envPath,
 			configDir: options.configDir,
 			exchangeProfile: options.exchangeProfile,
-			strategyProfile: strategyProfileForLoad,
+			strategyProfile: options.strategyProfile,
 			riskProfile: options.riskProfile,
 		});
 
-	if (agenaiConfig.strategy.id !== backtestConfig.strategyId) {
+	const resolvedStrategyId =
+		backtestConfig.strategyId ?? agenaiConfig.strategy.id;
+	const strategyProfileForLoad = resolveStrategyProfileName(
+		resolvedStrategyId,
+		options.strategyProfile
+	);
+
+	if (agenaiConfig.strategy.id !== resolvedStrategyId) {
 		runtimeLogger.warn("backtest_strategy_mismatch", {
-			requestedStrategy: backtestConfig.strategyId,
+			requestedStrategy: resolvedStrategyId,
 			loadedStrategy: agenaiConfig.strategy.id,
 		});
 		const fallbackProfile = strategyProfileForLoad;
@@ -123,25 +113,36 @@ export const runBacktest = async (
 				options.configDir,
 				fallbackProfile
 			);
-			if (reloadedStrategy.id !== backtestConfig.strategyId) {
+			if (reloadedStrategy.id !== resolvedStrategyId) {
 				throw new Error(
 					`profile ${fallbackProfile} resolved to ${reloadedStrategy.id}`
 				);
 			}
 			agenaiConfig.strategy = reloadedStrategy;
 			runtimeLogger.info("backtest_strategy_config_reloaded", {
-				requestedStrategy: backtestConfig.strategyId,
+				requestedStrategy: resolvedStrategyId,
 				reloadedProfile: fallbackProfile,
 				configDir: options.configDir ?? null,
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : "unknown_error";
 			throw new Error(
-				`Failed to load config for strategy ${backtestConfig.strategyId}. ` +
+				`Failed to load config for strategy ${resolvedStrategyId}. ` +
 					`Provide a matching --strategyProfile or ensure config exists. (${message})`
 			);
 		}
 	}
+
+	const runtimeParams = assertStrategyRuntimeParams(agenaiConfig.strategy);
+	const symbol = backtestConfig.symbol ?? runtimeParams.symbol;
+	const timeframe =
+		backtestConfig.timeframe ?? runtimeParams.executionTimeframe;
+	const effectiveConfig: BacktestResolvedConfig = {
+		...backtestConfig,
+		symbol,
+		timeframe,
+		strategyId: resolvedStrategyId,
+	};
 
 	const accountConfig =
 		options.accountConfig ??
@@ -160,7 +161,7 @@ export const runBacktest = async (
 
 	const riskManager = new RiskManager(agenaiConfig.risk);
 	const initialBalance =
-		backtestConfig.initialBalance ?? accountConfig.startingBalance ?? 1000;
+		effectiveConfig.initialBalance ?? accountConfig.startingBalance ?? 1000;
 	const paperAccount = new PaperAccount(initialBalance);
 	const executionEngine = new ExecutionEngine({
 		client,
@@ -169,43 +170,45 @@ export const runBacktest = async (
 	});
 
 	runtimeLogger.info("backtest_config", {
-		symbol: backtestConfig.symbol,
-		timeframe: backtestConfig.timeframe,
-		startTimestamp: new Date(backtestConfig.startTimestamp).toISOString(),
-		endTimestamp: new Date(backtestConfig.endTimestamp).toISOString(),
-		strategyId: backtestConfig.strategyId,
-		maxCandles: backtestConfig.maxCandles ?? null,
+		symbol,
+		timeframe,
+		startTimestamp: new Date(effectiveConfig.startTimestamp).toISOString(),
+		endTimestamp: new Date(effectiveConfig.endTimestamp).toISOString(),
+		strategyId: resolvedStrategyId,
+		maxCandles: effectiveConfig.maxCandles ?? null,
 		initialBalance,
 	});
 
 	const trackedTimeframes = deriveStrategyTimeframes(
-		backtestConfig.strategyId,
+		resolvedStrategyId,
 		agenaiConfig.strategy,
-		backtestConfig.timeframe
+		timeframe
 	);
 	const warmupByTimeframe = deriveWarmupCandles(
-		backtestConfig.strategyId,
+		resolvedStrategyId,
 		agenaiConfig.strategy,
-		backtestConfig.timeframe
+		timeframe
 	);
 
 	const timeframeSeries: TimeframeSeries[] = options.timeframeData
 		? buildProvidedSeries(options.timeframeData, trackedTimeframes)
 		: await loadTimeframeSeries(
 				dataProvider,
-				backtestConfig,
+				effectiveConfig,
 				trackedTimeframes,
-				warmupByTimeframe
+				warmupByTimeframe,
+				symbol,
+				timeframe
 			);
 
 	const cache = new BacktestTimeframeCache({
 		timeframes: trackedTimeframes,
-		limit: Math.max(backtestConfig.maxCandles ?? 600, 300),
+		limit: Math.max(effectiveConfig.maxCandles ?? 600, 300),
 	});
-	primeCacheWithWarmup(timeframeSeries, cache, backtestConfig.startTimestamp);
+	primeCacheWithWarmup(timeframeSeries, cache, effectiveConfig.startTimestamp);
 
 	const executionSeries = timeframeSeries.find(
-		(series) => series.timeframe === backtestConfig.timeframe
+		(series) => series.timeframe === timeframe
 	);
 	if (!executionSeries || executionSeries.candles.length === 0) {
 		throw new Error("No candles loaded for execution timeframe");
@@ -216,11 +219,7 @@ export const runBacktest = async (
 		: "builder";
 	const strategy = options.strategyOverride
 		? options.strategyOverride
-		: createBacktestStrategy(
-				backtestConfig.strategyId,
-				agenaiConfig.strategy,
-				cache
-			);
+		: createBacktestStrategy(resolvedStrategyId, agenaiConfig.strategy, cache);
 
 	logStrategyLoaded({
 		source: strategySource,
@@ -228,11 +227,11 @@ export const runBacktest = async (
 		strategyConfig: options.strategyOverride
 			? undefined
 			: agenaiConfig.strategy,
-		strategyId: backtestConfig.strategyId,
+		strategyId: resolvedStrategyId,
 		traderConfig: {
-			symbol: backtestConfig.symbol,
-			timeframe: backtestConfig.timeframe,
-			useTestnet: backtestConfig.useTestnet ?? false,
+			symbol,
+			timeframe,
+			useTestnet: effectiveConfig.useTestnet ?? false,
 		},
 		executionMode: "paper",
 		builderName: strategySource === "builder" ? "backtest_strategy" : undefined,
@@ -263,12 +262,12 @@ export const runBacktest = async (
 			candle.timestamp
 		);
 
-		const buffer = await cache.getCandles(backtestConfig.timeframe);
+		const buffer = await cache.getCandles(timeframe);
 		if (!buffer.length) {
 			continue;
 		}
 
-		const positionState = executionEngine.getPosition(backtestConfig.symbol);
+		const positionState = executionEngine.getPosition(symbol);
 		const unrealizedPnl = calculateUnrealizedPnl(positionState, candle.close);
 		const prePlanSnapshot = executionEngine.snapshotPaperAccount(unrealizedPnl);
 		const accountEquity = prePlanSnapshot?.equity ?? fallbackEquity;
@@ -286,7 +285,7 @@ export const runBacktest = async (
 		if (forcedExitHandled) {
 			const accountSnapshot = logAndSnapshotPosition(
 				executionEngine,
-				backtestConfig.symbol,
+				symbol,
 				candle.close,
 				candle.timestamp
 			);
@@ -298,7 +297,7 @@ export const runBacktest = async (
 		}
 
 		const trailingExitHandled = await maybeHandleTrailingStop(
-			backtestConfig.symbol,
+			symbol,
 			positionState,
 			candle,
 			riskManager,
@@ -310,7 +309,7 @@ export const runBacktest = async (
 		if (trailingExitHandled) {
 			const accountSnapshot = logAndSnapshotPosition(
 				executionEngine,
-				backtestConfig.symbol,
+				symbol,
 				candle.close,
 				candle.timestamp
 			);
@@ -367,13 +366,13 @@ export const runBacktest = async (
 			}
 		}
 
-		const latestPosition = executionEngine.getPosition(backtestConfig.symbol);
-		logPaperPosition(backtestConfig.symbol, latestPosition);
+		const latestPosition = executionEngine.getPosition(symbol);
+		logPaperPosition(symbol, latestPosition);
 
 		const accountSnapshot = snapshotPaperAccount(
 			executionEngine,
 			calculateUnrealizedPnl(latestPosition, candle.close),
-			backtestConfig.symbol,
+			symbol,
 			candle.timestamp
 		);
 		if (accountSnapshot) {
@@ -383,8 +382,8 @@ export const runBacktest = async (
 	}
 
 	runtimeLogger.info("backtest_summary", {
-		symbol: backtestConfig.symbol,
-		timeframe: backtestConfig.timeframe,
+		symbol,
+		timeframe,
 		totalCandles: executionSeries.candles.length,
 		totalTrades: trades.length,
 		finalEquity:
@@ -392,7 +391,7 @@ export const runBacktest = async (
 	});
 
 	return {
-		config: backtestConfig,
+		config: effectiveConfig,
 		trades,
 		equitySnapshots,
 	};
@@ -490,17 +489,19 @@ const loadTimeframeSeries = async (
 	dataProvider: DataProvider,
 	backtestConfig: BacktestConfig,
 	timeframes: string[],
-	warmupByTimeframe: WarmupMap
+	warmupByTimeframe: WarmupMap,
+	symbol: string,
+	executionTimeframe: string
 ): Promise<TimeframeSeries[]> => {
 	const request: HistoricalSeriesRequest = {
-		symbol: backtestConfig.symbol,
+		symbol,
 		startTimestamp: backtestConfig.startTimestamp,
 		endTimestamp: backtestConfig.endTimestamp,
 		requests: timeframes.map((timeframe) => ({
 			timeframe,
 			warmup: warmupByTimeframe.get(timeframe) ?? 0,
 			limit:
-				timeframe === backtestConfig.timeframe &&
+				timeframe === executionTimeframe &&
 				typeof backtestConfig.maxCandles === "number"
 					? backtestConfig.maxCandles
 					: undefined,

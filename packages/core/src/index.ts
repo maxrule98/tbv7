@@ -7,4 +7,6 @@ export * from "./strategies/registry";
 export * from "./strategies/loadStrategy";
 export * from "./strategies/ids";
 export * from "./strategies/selection";
+export * from "./strategies/profiles";
+export * from "./strategies/runtimeConfig";
 export * from "./utils/logger";

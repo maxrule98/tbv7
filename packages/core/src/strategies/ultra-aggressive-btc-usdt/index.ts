@@ -293,6 +293,7 @@ export const loadUltraAggressiveConfig = (
 export const ultraAggressiveModule = {
 	id: ULTRA_AGGRESSIVE_ID,
 	manifest: ultraAggressiveManifest,
+	defaultProfile: "ultra-aggressive-btc-usdt",
 	createStrategy: (
 		config: UltraAggressiveBtcUsdtConfig,
 		deps: UltraAggressiveDeps

@@ -5,6 +5,7 @@ import {
 	ExecutionMode,
 	RiskConfig,
 	StrategyId,
+	assertStrategyRuntimeParams,
 	loadAccountConfig,
 	loadAgenaiConfig,
 } from "@agenai/core";
@@ -44,8 +45,8 @@ export const DEFAULT_POLL_INTERVAL_MS = 10_000;
 const BOOTSTRAP_CANDLE_LIMIT = 300;
 
 export interface TraderConfig {
-	symbol: string;
-	timeframe: string;
+	symbol?: string;
+	timeframe?: string;
 	useTestnet: boolean;
 	executionMode?: ExecutionMode;
 	pollIntervalMs?: number;
@@ -87,6 +88,11 @@ export const startTrader = async (
 		traderConfig.executionMode ?? agenaiConfig.env.executionMode ?? "paper";
 	const resolvedStrategyId =
 		traderConfig.strategyId ?? agenaiConfig.strategy.id;
+	const runtimeParams = assertStrategyRuntimeParams(agenaiConfig.strategy);
+	const instrument = {
+		symbol: traderConfig.symbol ?? runtimeParams.symbol,
+		timeframe: traderConfig.timeframe ?? runtimeParams.executionTimeframe,
+	};
 
 	const client = new MexcClient({
 		apiKey: agenaiConfig.exchange.credentials.apiKey,
@@ -101,8 +107,8 @@ export const startTrader = async (
 		options.strategyBuilder ??
 		resolveStrategyBuilder(resolvedStrategyId, {
 			strategyConfig: agenaiConfig.strategy,
-			symbol: traderConfig.symbol,
-			timeframe: traderConfig.timeframe,
+			symbol: instrument.symbol,
+			timeframe: instrument.timeframe,
 		});
 
 	const strategySource: StrategySource = options.strategyOverride
@@ -126,8 +132,8 @@ export const startTrader = async (
 		: accountConfig.startingBalance || 100;
 
 	runtimeLogger.info("trader_config", {
-		symbol: traderConfig.symbol,
-		timeframe: traderConfig.timeframe,
+		symbol: instrument.symbol,
+		timeframe: instrument.timeframe,
 		useTestnet: traderConfig.useTestnet,
 		executionMode,
 		strategyId: resolvedStrategyId,
@@ -140,8 +146,8 @@ export const startTrader = async (
 			: agenaiConfig.strategy,
 		strategyId: resolvedStrategyId,
 		traderConfig: {
-			symbol: traderConfig.symbol,
-			timeframe: traderConfig.timeframe,
+			symbol: instrument.symbol,
+			timeframe: instrument.timeframe,
 			useTestnet: traderConfig.useTestnet,
 		},
 		executionMode,
@@ -164,8 +170,8 @@ export const startTrader = async (
 
 	await bootstrapCandles(
 		dataProvider,
-		traderConfig.symbol,
-		traderConfig.timeframe,
+		instrument.symbol,
+		instrument.timeframe,
 		candlesBySymbol,
 		lastTimestampBySymbol
 	);
@@ -177,8 +183,8 @@ export const startTrader = async (
 		agenaiConfig.risk,
 		executionEngine,
 		initialEquity,
-		traderConfig.symbol,
-		traderConfig.timeframe,
+		instrument.symbol,
+		instrument.timeframe,
 		candlesBySymbol,
 		lastTimestampBySymbol,
 		traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS

@@ -236,6 +236,7 @@ export const loadVWAPDeltaGammaConfig = (
 export const vwapDeltaGammaModule = {
 	id: VWAP_DELTA_GAMMA_ID,
 	manifest: vwapManifest,
+	defaultProfile: "vwap-delta-gamma",
 	createStrategy: (
 		config: VWAPDeltaGammaConfig,
 		deps: VWAPDeltaGammaStrategyDependencies
