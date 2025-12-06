@@ -41,7 +41,6 @@ agenai-trader/
 
   packages/
     core/
-    exchange-binance/
     exchange-mexc/
     indicators/
     models-quant/

@@ -1,8 +1,0 @@
-{
-  "exchange": "binance",
-  "market": "usdt-m",
-  "testnet": true,
-  "restEndpoint": "https://testnet.binancefuture.com",
-  "wsEndpoint": "wss://fstream.binancefuture.com/stream",
-  "defaultSymbol": "BTC/USDT"
-}

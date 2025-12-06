@@ -58,9 +58,6 @@ export type ExecutionMode = "paper" | "live";
 export interface EnvConfig {
 	exchangeId: string;
 	executionMode: ExecutionMode;
-	binanceApiKey: string;
-	binanceApiSecret: string;
-	binanceUseTestnet: boolean;
 	mexcApiKey: string;
 	mexcApiSecret: string;
 	defaultSymbol: string;
@@ -157,13 +154,6 @@ const getEnvVar = (key: string, fallback?: string): string => {
 	throw new Error(`Missing required environment variable: ${key}`);
 };
 
-const toBoolean = (value: string | undefined, fallback = false): boolean => {
-	if (value === undefined) {
-		return fallback;
-	}
-	return value.toLowerCase() === "true";
-};
-
 const normalizeExecutionMode = (value: string | undefined): ExecutionMode => {
 	return value?.toLowerCase() === "live" ? "live" : "paper";
 };
@@ -183,12 +173,6 @@ export const loadEnvConfig = (envPath = getDefaultEnvPath()): EnvConfig => {
 	return {
 		exchangeId: getEnvVar("EXCHANGE_ID", "mexc"),
 		executionMode: normalizeExecutionMode(getEnvVar("EXECUTION_MODE", "paper")),
-		binanceApiKey: getEnvVar("BINANCE_API_KEY", ""),
-		binanceApiSecret: getEnvVar("BINANCE_API_SECRET", ""),
-		binanceUseTestnet: toBoolean(
-			getEnvVar("BINANCE_USE_TESTNET", "false"),
-			false
-		),
 		mexcApiKey: getEnvVar("MEXC_API_KEY", ""),
 		mexcApiSecret: getEnvVar("MEXC_API_SECRET", ""),
 		defaultSymbol: getEnvVar("DEFAULT_SYMBOL", "BTC/USDT"),
@@ -204,14 +188,14 @@ export const loadExchangeConfig = (
 	const profile = exchangeProfile ?? env.exchangeId ?? "mexc";
 	const exchangePath = path.join(configDir, "exchange", `${profile}.json`);
 	const exchangeFile = readJsonFile<ExchangeConfigFile>(exchangePath);
-	const isBinance = profile.startsWith("binance");
-	const credentials = isBinance
-		? { apiKey: env.binanceApiKey, apiSecret: env.binanceApiSecret }
-		: { apiKey: env.mexcApiKey, apiSecret: env.mexcApiSecret };
+	const credentials = {
+		apiKey: env.mexcApiKey,
+		apiSecret: env.mexcApiSecret,
+	};
 	return {
 		...exchangeFile,
 		id: profile,
-		testnet: isBinance ? env.binanceUseTestnet : exchangeFile.testnet,
+		testnet: exchangeFile.testnet,
 		defaultSymbol: env.defaultSymbol || exchangeFile.defaultSymbol,
 		credentials,
 	};

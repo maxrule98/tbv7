@@ -110,9 +110,6 @@ const createAgenaiConfig = (): AgenaiConfig => {
 		env: {
 			exchangeId: "mexc",
 			executionMode: "paper",
-			binanceApiKey: "",
-			binanceApiSecret: "",
-			binanceUseTestnet: false,
 			mexcApiKey: "",
 			mexcApiSecret: "",
 			defaultSymbol: symbol,
