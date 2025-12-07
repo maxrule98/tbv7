@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { getWorkspaceRoot } from "@agenai/core";
 
 interface CliOptions {
 	file?: string;
@@ -16,7 +17,7 @@ interface MetricsSummary {
 	finalEquity: number | null;
 }
 
-const OUTPUT_DIR = path.join(process.cwd(), "output", "backtests");
+const OUTPUT_DIR = path.join(getWorkspaceRoot(), "output", "backtests");
 
 const parseArgs = (): CliOptions => {
 	const args = process.argv.slice(2);

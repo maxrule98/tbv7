@@ -1,3 +1,7 @@
+import type {
+	StrategyRegistryEntry,
+	StrategyRuntimeParams,
+} from "@agenai/core";
 import {
 	AccountConfig,
 	AgenaiConfig,
@@ -6,11 +10,8 @@ import {
 	StrategyConfig,
 	StrategyId,
 	TradeIntent,
-	UltraAggressiveBtcUsdtConfig,
-	UltraAggressiveBtcUsdtStrategy,
-	VWAPDeltaGammaConfig,
-	VWAPDeltaGammaStrategy,
 	assertStrategyRuntimeParams,
+	getStrategyDefinition,
 	loadAccountConfig,
 	loadAgenaiConfig,
 	loadStrategyConfig,
@@ -143,6 +144,20 @@ export const runBacktest = async (
 		timeframe,
 		strategyId: resolvedStrategyId,
 	};
+	const trackedTimeframes = collectStrategyTimeframes(
+		runtimeParams,
+		agenaiConfig.strategy,
+		timeframe
+	);
+	const warmupByTimeframe = deriveWarmupCandles(
+		agenaiConfig.strategy,
+		trackedTimeframes
+	);
+	const cacheLimit = determineCacheLimit(
+		agenaiConfig.strategy,
+		warmupByTimeframe,
+		effectiveConfig.maxCandles
+	);
 
 	const accountConfig =
 		options.accountConfig ??
@@ -179,17 +194,6 @@ export const runBacktest = async (
 		initialBalance,
 	});
 
-	const trackedTimeframes = deriveStrategyTimeframes(
-		resolvedStrategyId,
-		agenaiConfig.strategy,
-		timeframe
-	);
-	const warmupByTimeframe = deriveWarmupCandles(
-		resolvedStrategyId,
-		agenaiConfig.strategy,
-		timeframe
-	);
-
 	const timeframeSeries: TimeframeSeries[] = options.timeframeData
 		? buildProvidedSeries(options.timeframeData, trackedTimeframes)
 		: await loadTimeframeSeries(
@@ -203,7 +207,7 @@ export const runBacktest = async (
 
 	const cache = new BacktestTimeframeCache({
 		timeframes: trackedTimeframes,
-		limit: Math.max(effectiveConfig.maxCandles ?? 600, 300),
+		limit: cacheLimit,
 	});
 	primeCacheWithWarmup(timeframeSeries, cache, effectiveConfig.startTimestamp);
 
@@ -219,7 +223,7 @@ export const runBacktest = async (
 		: "builder";
 	const strategy = options.strategyOverride
 		? options.strategyOverride
-		: createBacktestStrategy(resolvedStrategyId, agenaiConfig.strategy, cache);
+		: await createBacktestStrategy(agenaiConfig.strategy, cache);
 
 	logStrategyLoaded({
 		source: strategySource,
@@ -397,69 +401,97 @@ export const runBacktest = async (
 	};
 };
 
-const deriveStrategyTimeframes = (
-	strategyId: StrategyId,
+const collectStrategyTimeframes = (
+	runtimeParams: StrategyRuntimeParams,
 	strategyConfig: StrategyConfig,
 	executionTimeframe: string
 ): string[] => {
-	const frames = new Set<string>([executionTimeframe]);
-	if (strategyId === "ultra_aggressive_btc_usdt") {
-		const cfg = strategyConfig as UltraAggressiveBtcUsdtConfig;
-		frames.add(cfg.timeframes.execution);
-		frames.add(cfg.timeframes.confirming);
-		frames.add(cfg.timeframes.context);
+	const frames = new Set<string>();
+	const addFrame = (value?: string): void => {
+		if (typeof value !== "string") {
+			return;
+		}
+		const trimmed = value.trim();
+		if (trimmed.length) {
+			frames.add(trimmed);
+		}
+	};
+
+	addFrame(runtimeParams.executionTimeframe);
+	addFrame(executionTimeframe);
+	Object.values(runtimeParams.timeframes).forEach(addFrame);
+
+	const configTimeframes = (
+		strategyConfig as {
+			timeframes?: Record<string, string>;
+		}
+	).timeframes;
+	if (configTimeframes) {
+		Object.values(configTimeframes).forEach(addFrame);
 	}
-	if (strategyId === "vwap_delta_gamma") {
-		const cfg = strategyConfig as VWAPDeltaGammaConfig;
-		frames.add(cfg.timeframes.execution);
-		frames.add(cfg.timeframes.trend);
-		frames.add(cfg.timeframes.bias);
-		frames.add(cfg.timeframes.macro);
+
+	const tracked = (strategyConfig as { trackedTimeframes?: unknown })
+		.trackedTimeframes;
+	if (Array.isArray(tracked)) {
+		tracked.forEach(addFrame);
 	}
+
 	return Array.from(frames);
 };
 
 const deriveWarmupCandles = (
-	strategyId: StrategyId,
 	strategyConfig: StrategyConfig,
-	executionTimeframe: string
+	trackedTimeframes: string[]
 ): WarmupMap => {
 	const warmup = new Map<string, number>();
-	const ensure = (timeframe: string, candles: number): void => {
-		if (!timeframe) {
-			return;
+	const warmupConfig = (
+		strategyConfig as {
+			warmupPeriods?: Record<string, number>;
 		}
-		const normalized = Math.max(0, Math.floor(candles));
-		const current = warmup.get(timeframe) ?? 0;
-		warmup.set(timeframe, Math.max(current, normalized));
-	};
+	).warmupPeriods;
+	const defaultWarmup = asNonNegativeInteger(warmupConfig?.default) ?? 0;
 
-	ensure(executionTimeframe, 300);
-
-	if (strategyId === "vwap_delta_gamma") {
-		const cfg = strategyConfig as VWAPDeltaGammaConfig;
-		ensure(cfg.timeframes.execution, cfg.vwapRollingLong + 20);
-		ensure(cfg.timeframes.trend, Math.max(cfg.vwapRollingLong / 2, 150));
-		ensure(cfg.timeframes.bias, 180);
-		ensure(cfg.timeframes.macro, 120);
-	}
-
-	if (strategyId === "ultra_aggressive_btc_usdt") {
-		const cfg = strategyConfig as UltraAggressiveBtcUsdtConfig;
-		const maxLookback = Math.max(
-			cfg.lookbacks.executionBars,
-			cfg.lookbacks.breakoutRange,
-			cfg.lookbacks.rangeDetection,
-			cfg.lookbacks.trendCandles,
-			cfg.lookbacks.volatility,
-			cfg.lookbacks.cvd
-		);
-		ensure(cfg.timeframes.execution, maxLookback + 20);
-		ensure(cfg.timeframes.confirming, Math.max(maxLookback / 3, 100));
-		ensure(cfg.timeframes.context, Math.max(maxLookback / 4, 80));
+	for (const timeframe of trackedTimeframes) {
+		const configuredValue = warmupConfig?.[timeframe];
+		const candles = asNonNegativeInteger(configuredValue) ?? defaultWarmup;
+		warmup.set(timeframe, candles);
 	}
 
 	return warmup;
+};
+
+const determineCacheLimit = (
+	strategyConfig: StrategyConfig,
+	warmupByTimeframe: WarmupMap,
+	maxCandlesOverride?: number
+): number => {
+	let warmupMax = 0;
+	for (const value of warmupByTimeframe.values()) {
+		warmupMax = Math.max(warmupMax, value);
+	}
+	const historyWindow = asPositiveInteger(
+		(strategyConfig as { historyWindowCandles?: number }).historyWindowCandles
+	);
+	const overrideLimit = asPositiveInteger(maxCandlesOverride);
+	const fallback = warmupMax > 0 ? warmupMax : 1;
+	const candidate = overrideLimit ?? historyWindow ?? fallback;
+	return Math.max(candidate, fallback);
+};
+
+const asNonNegativeInteger = (value?: number): number | undefined => {
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		return undefined;
+	}
+	const normalized = Math.floor(value);
+	return normalized >= 0 ? normalized : undefined;
+};
+
+const asPositiveInteger = (value?: number): number | undefined => {
+	const normalized = asNonNegativeInteger(value);
+	if (normalized === undefined || normalized === 0) {
+		return undefined;
+	}
+	return normalized;
 };
 
 const primeCacheWithWarmup = (
@@ -557,31 +589,45 @@ const updateCacheUntilTimestamp = (
 	}
 };
 
-const createBacktestStrategy = (
-	strategyId: StrategyId,
+const createBacktestStrategy = async (
 	strategyConfig: StrategyConfig,
 	cache: BacktestTimeframeCache
-): TraderStrategy => {
-	if (strategyId === "ultra_aggressive_btc_usdt") {
-		const strategy = new UltraAggressiveBtcUsdtStrategy(
-			strategyConfig as UltraAggressiveBtcUsdtConfig,
-			{ cache }
-		);
-		return createCacheDrivenAdapter(strategy);
+): Promise<TraderStrategy> => {
+	const entry = getStrategyDefinition(strategyConfig.id);
+	const dependencies = buildBacktestDependencies(entry, strategyConfig, cache);
+	const strategyInstance = entry.createStrategy(
+		strategyConfig as unknown,
+		dependencies
+	) as CacheDrivenStrategy;
+	if (entry.dependencies?.warmup) {
+		await entry.dependencies.warmup(strategyConfig as unknown, dependencies);
 	}
-	if (strategyId === "vwap_delta_gamma") {
-		const strategy = new VWAPDeltaGammaStrategy(
-			strategyConfig as VWAPDeltaGammaConfig,
-			{ cache }
-		);
-		return createCacheDrivenAdapter(strategy);
-	}
-	throw new Error(`No backtest strategy constructed for ${strategyId}`);
+	return createCacheDrivenAdapter(strategyInstance);
 };
 
-const createCacheDrivenAdapter = (strategy: {
+const buildBacktestDependencies = <TConfig, TDeps, TStrategy>(
+	entry: StrategyRegistryEntry<TConfig, TDeps, TStrategy>,
+	strategyConfig: StrategyConfig,
+	cache: BacktestTimeframeCache
+): TDeps => {
+	if (entry.dependencies?.buildBacktestDeps) {
+		return entry.dependencies.buildBacktestDeps(strategyConfig as TConfig, {
+			cache,
+		});
+	}
+	if (entry.dependencies?.createCache) {
+		return { cache } as TDeps;
+	}
+	return {} as TDeps;
+};
+
+type CacheDrivenStrategy = {
 	decide: (position: PositionSide) => Promise<TradeIntent>;
-}): TraderStrategy => {
+};
+
+const createCacheDrivenAdapter = (
+	strategy: CacheDrivenStrategy
+): TraderStrategy => {
 	return {
 		decide: (_candles: Candle[], position: PositionSide) =>
 			strategy.decide(position),

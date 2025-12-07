@@ -3,9 +3,18 @@ import path from "node:path";
 import dotenv from "dotenv";
 
 import type { StrategyId } from "./strategies/types";
-import type { VWAPDeltaGammaConfig } from "./strategies/vwap-delta-gamma/config";
-import type { UltraAggressiveBtcUsdtConfig } from "./strategies/ultra-aggressive-btc-usdt/config";
 export type { StrategyId } from "./strategies/types";
+
+export interface StrategyConfig {
+	id: StrategyId;
+	symbol?: string;
+	timeframes?: Record<string, string>;
+	trackedTimeframes?: string[];
+	warmupPeriods?: Record<string, number>;
+	historyWindowCandles?: number;
+	cacheTTLms?: number;
+	[key: string]: unknown;
+}
 
 let envLoaded = false;
 let loadedEnvPath: string | undefined;
@@ -22,19 +31,7 @@ interface ExchangeConfigFile {
 	defaultSymbol: string;
 }
 
-type VwapStrategyConfigFile = VWAPDeltaGammaConfig & {
-	id: StrategyId;
-	symbol?: string;
-};
-
-type UltraAggressiveStrategyConfigFile = UltraAggressiveBtcUsdtConfig & {
-	id: StrategyId;
-	symbol?: string;
-};
-
-type StrategyConfigFile =
-	| VwapStrategyConfigFile
-	| UltraAggressiveStrategyConfigFile;
+type StrategyConfigFile = StrategyConfig;
 
 interface RiskConfigFile {
 	maxLeverage: number;
@@ -52,6 +49,25 @@ interface RiskConfigFile {
 interface AccountConfigFile {
 	startingBalance: number;
 }
+
+const ensureNumber = (value: number | undefined, field: string): number => {
+	if (typeof value !== "number" || Number.isNaN(value)) {
+		throw new Error(`Required numeric field missing in ${field}`);
+	}
+	return value;
+};
+
+const resolveRiskPerTradePercent = (file: RiskConfigFile): number => {
+	if (typeof file.riskPerTradePercent === "number") {
+		return file.riskPerTradePercent;
+	}
+	if (typeof file.riskPerTradePct === "number") {
+		return file.riskPerTradePct / 100;
+	}
+	throw new Error(
+		"Risk config must define riskPerTradePercent or riskPerTradePct"
+	);
+};
 
 export type ExecutionMode = "paper" | "live";
 
@@ -72,12 +88,7 @@ export interface ExchangeConfig extends ExchangeConfigFile {
 	};
 }
 
-export type StrategyConfig =
-	| (VWAPDeltaGammaConfig & { id: "vwap_delta_gamma"; symbol?: string })
-	| (UltraAggressiveBtcUsdtConfig & {
-			id: "ultra_aggressive_btc_usdt";
-			symbol?: string;
-	  });
+// StrategyConfig interface declared near top
 
 type StrategyRegistryModule = typeof import("./strategies/registry");
 let cachedStrategyRegistry: StrategyRegistryModule | undefined;
@@ -145,7 +156,7 @@ export const getWorkspaceRoot = (): string => findWorkspaceRoot();
 const getDefaultEnvPath = (): string => path.join(findWorkspaceRoot(), ".env");
 const getDefaultConfigDir = (): string =>
 	path.join(findWorkspaceRoot(), "config");
-const getDefaultStrategyDir = (): string => {
+export const getDefaultStrategyDir = (): string => {
 	const workspaceRoot = findWorkspaceRoot();
 	const modernDir = path.join(workspaceRoot, "configs");
 	if (fs.existsSync(path.join(modernDir, "strategies"))) {
@@ -186,8 +197,8 @@ export const loadEnvConfig = (envPath = getDefaultEnvPath()): EnvConfig => {
 		executionMode: normalizeExecutionMode(getEnvVar("EXECUTION_MODE", "paper")),
 		mexcApiKey: getEnvVar("MEXC_API_KEY", ""),
 		mexcApiSecret: getEnvVar("MEXC_API_SECRET", ""),
-		defaultSymbol: getEnvVar("DEFAULT_SYMBOL", "BTC/USDT"),
-		defaultTimeframe: getEnvVar("DEFAULT_TIMEFRAME", "1m"),
+		defaultSymbol: getEnvVar("DEFAULT_SYMBOL", ""),
+		defaultTimeframe: getEnvVar("DEFAULT_TIMEFRAME", ""),
 	};
 };
 
@@ -212,7 +223,7 @@ export const loadExchangeConfig = (
 	};
 };
 
-const resolveStrategyConfigPath = (
+export const resolveStrategyConfigPath = (
 	strategyDir: string,
 	strategyProfile: string
 ): string => {
@@ -246,20 +257,10 @@ export const loadStrategyConfig = (
 		);
 	}
 	getStrategyRegistry().getStrategyDefinition(strategyId);
-	switch (strategyId) {
-		case "vwap_delta_gamma":
-			return {
-				...(file as VwapStrategyConfigFile),
-				id: "vwap_delta_gamma",
-			};
-		case "ultra_aggressive_btc_usdt":
-			return {
-				...(file as UltraAggressiveStrategyConfigFile),
-				id: "ultra_aggressive_btc_usdt",
-			};
-		default:
-			throw new Error(`Unsupported strategy id in config: ${strategyId}`);
-	}
+	return {
+		...file,
+		id: strategyId,
+	};
 };
 
 export const loadRiskConfig = (
@@ -268,19 +269,22 @@ export const loadRiskConfig = (
 ): RiskConfig => {
 	const riskPath = path.join(configDir, "risk", `${riskProfile}.json`);
 	const file = readJsonFile<RiskConfigFile>(riskPath);
-	const riskPerTradePercent =
-		file.riskPerTradePercent ??
-		(file.riskPerTradePct !== undefined ? file.riskPerTradePct / 100 : 0.01);
 	return {
-		maxLeverage: file.maxLeverage,
-		riskPerTradePercent,
-		maxPositions: file.maxPositions,
-		slPct: file.slPct,
-		tpPct: file.tpPct,
-		minPositionSize: file.minPositionSize ?? 0.001,
-		maxPositionSize: file.maxPositionSize ?? 1,
-		trailingActivationPct: file.trailingActivationPct ?? 0.005,
-		trailingTrailPct: file.trailingTrailPct ?? 0.003,
+		maxLeverage: ensureNumber(file.maxLeverage, "risk.maxLeverage"),
+		riskPerTradePercent: resolveRiskPerTradePercent(file),
+		maxPositions: ensureNumber(file.maxPositions, "risk.maxPositions"),
+		slPct: ensureNumber(file.slPct, "risk.slPct"),
+		tpPct: ensureNumber(file.tpPct, "risk.tpPct"),
+		minPositionSize: ensureNumber(file.minPositionSize, "risk.minPositionSize"),
+		maxPositionSize: ensureNumber(file.maxPositionSize, "risk.maxPositionSize"),
+		trailingActivationPct: ensureNumber(
+			file.trailingActivationPct,
+			"risk.trailingActivationPct"
+		),
+		trailingTrailPct: ensureNumber(
+			file.trailingTrailPct,
+			"risk.trailingTrailPct"
+		),
 	};
 };
 

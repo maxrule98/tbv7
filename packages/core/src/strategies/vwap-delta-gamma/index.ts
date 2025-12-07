@@ -1,6 +1,5 @@
 import fs from "node:fs";
-import path from "node:path";
-import { getWorkspaceRoot } from "../../config";
+import { getDefaultStrategyDir, resolveStrategyConfigPath } from "../../config";
 import {
 	MultiTimeframeCache,
 	MultiTimeframeCacheOptions,
@@ -222,11 +221,9 @@ export const createVWAPDeltaGammaCache = (
 	});
 
 export const loadVWAPDeltaGammaConfig = (
-	configPath = path.join(
-		getWorkspaceRoot(),
-		"config",
-		"strategies",
-		"vwap-delta-gamma.json"
+	configPath = resolveStrategyConfigPath(
+		getDefaultStrategyDir(),
+		"vwap-delta-gamma"
 	)
 ): VWAPDeltaGammaConfig => {
 	const contents = fs.readFileSync(configPath, "utf-8");
@@ -244,6 +241,10 @@ export const vwapDeltaGammaModule = {
 	loadConfig: loadVWAPDeltaGammaConfig,
 	dependencies: {
 		createCache: createVWAPDeltaGammaCache,
+		buildBacktestDeps: (
+			_config: VWAPDeltaGammaConfig,
+			{ cache }: { cache: MultiTimeframeCache }
+		): VWAPDeltaGammaStrategyDependencies => ({ cache }),
 	},
 };
 

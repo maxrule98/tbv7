@@ -33,6 +33,10 @@ export interface StrategyDependencyMetadata<TConfig, TDeps> {
 		maxAgeMs: number
 	) => MultiTimeframeCache;
 	warmup?: (config: TConfig, deps?: TDeps) => Promise<void> | void;
+	buildBacktestDeps?: (
+		config: TConfig,
+		options: { cache: MultiTimeframeCache }
+	) => TDeps;
 }
 
 type AnyStrategyEntry = StrategyRegistryEntry<any, any, any>;

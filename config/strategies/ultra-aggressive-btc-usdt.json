@@ -7,6 +7,13 @@
 		"confirming": "5m",
 		"context": "15m"
 	},
+	"historyWindowCandles": 600,
+	"warmupPeriods": {
+		"default": 80,
+		"1m": 300,
+		"5m": 100,
+		"15m": 80
+	},
 	"playTypePriority": [
 		"liquiditySweep",
 		"breakoutTrap",

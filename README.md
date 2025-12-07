@@ -117,6 +117,11 @@ Every strategy JSON file must declare an `id` that matches one of the registered
 	"id": "macd_ar4",
 	"symbol": "BTC/USDT",
 	"timeframe": "1m",
+	"historyWindowCandles": 450,
+	"warmupPeriods": {
+		"default": 120,
+		"1m": 240
+	},
 	"indicators": {
 		"emaFast": 12,
 		"emaSlow": 26,
@@ -129,6 +134,8 @@ Every strategy JSON file must declare an `id` that matches one of the registered
 	"mode": "long-only"
 }
 ```
+
+Declare `warmupPeriods` (per timeframe candle counts) and `historyWindowCandles` for every strategy profile so backtests and live caches know how much historical data to hydrate without relying on hardcoded defaults.
 
 ---
 

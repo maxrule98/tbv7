@@ -5,12 +5,14 @@ export const VWAP_DELTA_GAMMA_ID: StrategyId = "vwap_delta_gamma";
 
 export interface VWAPDeltaGammaConfig {
 	name: string;
+	symbol: string;
 	timeframes: {
 		execution: string;
 		trend: string;
 		bias: string;
 		macro: string;
 	};
+	trackedTimeframes?: string[];
 	atrPeriod1m: number;
 	atrPeriod5m: number;
 	vwapRollingShort: number;
@@ -21,6 +23,8 @@ export interface VWAPDeltaGammaConfig {
 	minPullbackDistance: number;
 	macdForecastDeadband: number;
 	cacheTTLms: number;
+	historyWindowCandles?: number;
+	warmupPeriods: Record<string, number>;
 	atr?: {
 		requireExpansionForTrend?: boolean;
 		minAtr1m?: number;

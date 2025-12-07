@@ -83,17 +83,31 @@ class CacheBackedStrategyAdapter implements TraderStrategy {
 }
 
 const deriveTimeframes = (strategyConfig: StrategyConfig): string[] => {
-	const frames =
+	const frameSet = new Set<string>();
+	if (
 		strategyConfig &&
 		typeof strategyConfig === "object" &&
 		"timeframes" in strategyConfig
-			? Object.values(
-					(strategyConfig as { timeframes?: Record<string, string> })
-						.timeframes ?? {}
-			  ).filter(
-					(value): value is string =>
-						typeof value === "string" && value.length > 0
-			  )
-			: [];
-	return Array.from(new Set(frames));
+	) {
+		const timeframes = (
+			strategyConfig as { timeframes?: Record<string, string> }
+		).timeframes;
+		if (timeframes) {
+			for (const value of Object.values(timeframes)) {
+				if (typeof value === "string" && value.length > 0) {
+					frameSet.add(value);
+				}
+			}
+		}
+	}
+	const tracked = (strategyConfig as { trackedTimeframes?: unknown })
+		.trackedTimeframes;
+	if (Array.isArray(tracked)) {
+		for (const tf of tracked) {
+			if (typeof tf === "string" && tf.length > 0) {
+				frameSet.add(tf);
+			}
+		}
+	}
+	return Array.from(frameSet);
 };

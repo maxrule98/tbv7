@@ -11,7 +11,7 @@ export class BacktestTimeframeCache implements MultiTimeframeCache {
 	private readonly tracked: Set<string>;
 
 	constructor(options: BacktestTimeframeCacheOptions) {
-		this.limit = Math.max(options.limit ?? 600, 1);
+		this.limit = Math.max(options.limit ?? 1, 1);
 		this.tracked = new Set(options.timeframes);
 		for (const tf of this.tracked) {
 			this.frames.set(tf, []);

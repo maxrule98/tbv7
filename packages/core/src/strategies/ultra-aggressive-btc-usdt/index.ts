@@ -1,6 +1,5 @@
 import fs from "node:fs";
-import path from "node:path";
-import { getWorkspaceRoot } from "../../config";
+import { getDefaultStrategyDir, resolveStrategyConfigPath } from "../../config";
 import {
 	MultiTimeframeCache,
 	MultiTimeframeCacheOptions,
@@ -279,11 +278,9 @@ export const createUltraAggressiveCache = (
 	});
 
 export const loadUltraAggressiveConfig = (
-	configPath = path.join(
-		getWorkspaceRoot(),
-		"config",
-		"strategies",
-		"ultra-aggressive-btc-usdt.json"
+	configPath = resolveStrategyConfigPath(
+		getDefaultStrategyDir(),
+		"ultra-aggressive-btc-usdt"
 	)
 ): UltraAggressiveBtcUsdtConfig => {
 	const contents = fs.readFileSync(configPath, "utf-8");
@@ -301,6 +298,10 @@ export const ultraAggressiveModule = {
 	loadConfig: loadUltraAggressiveConfig,
 	dependencies: {
 		createCache: createUltraAggressiveCache,
+		buildBacktestDeps: (
+			_config: UltraAggressiveBtcUsdtConfig,
+			{ cache }: { cache: MultiTimeframeCache }
+		): UltraAggressiveDeps => ({ cache }),
 	},
 };
 

@@ -71,6 +71,13 @@ const createAgenaiConfig = (): AgenaiConfig => {
 			confirming: "5m",
 			context: "15m",
 		},
+		historyWindowCandles: 500,
+		warmupPeriods: {
+			default: 50,
+			"1m": 120,
+			"5m": 60,
+			"15m": 60,
+		},
 		cacheTTLms: 1500,
 		atrPeriod1m: 14,
 		atrPeriod5m: 14,

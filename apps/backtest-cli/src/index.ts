@@ -9,6 +9,7 @@ import {
 	StrategyConfig,
 	StrategyId,
 	assertStrategyRuntimeParams,
+	getWorkspaceRoot,
 	loadAgenaiConfig,
 	loadStrategyConfig,
 	resolveStrategyProfileName,
@@ -126,7 +127,7 @@ const persistBacktestResult = (
 	const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 	const safeSymbol = context.symbol.replace(/[\\/]/g, "");
 	const fileName = `${context.strategyId}-${safeSymbol}-${context.timeframe}-${timestamp}.json`;
-	const outputDir = path.resolve(process.cwd(), "output", "backtests");
+	const outputDir = path.join(getWorkspaceRoot(), "output", "backtests");
 	fs.mkdirSync(outputDir, { recursive: true });
 	const fingerprint = createHash("sha1")
 		.update(

@@ -98,7 +98,12 @@ const resolveDependencies = async <TConfig, TDeps, TStrategy>(
 	}
 
 	const timeframes = options.cache.timeframes ?? extractTimeframes(config);
-	const maxAgeMs = options.cache.maxAgeMs ?? inferCacheTtl(config) ?? 60_000;
+	const maxAgeMs = options.cache.maxAgeMs ?? inferCacheTtl(config);
+	if (typeof maxAgeMs !== "number") {
+		throw new Error(
+			`Strategy ${entry.id} is missing cacheTTLms. Provide cache.maxAgeMs or set cacheTTLms in the config.`
+		);
+	}
 	const cache = entry.dependencies.createCache(
 		options.cache.fetcher,
 		options.cache.symbol,

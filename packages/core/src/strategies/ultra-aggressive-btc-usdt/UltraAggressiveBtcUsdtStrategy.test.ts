@@ -107,6 +107,13 @@ const buildTestConfig = (): UltraAggressiveBtcUsdtConfig => ({
 		confirming: "5m",
 		context: "15m",
 	},
+	historyWindowCandles: 400,
+	warmupPeriods: {
+		default: 60,
+		"1m": 120,
+		"5m": 60,
+		"15m": 60,
+	},
 	cacheTTLms: 1000,
 	atrPeriod1m: 5,
 	atrPeriod5m: 5,

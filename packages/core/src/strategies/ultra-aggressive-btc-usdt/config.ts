@@ -46,6 +46,7 @@ export interface UltraAggressiveBtcUsdtConfig {
 		confirming: string;
 		context: string;
 	};
+	trackedTimeframes?: string[];
 	playTypePriority: UltraAggressivePlayType[];
 	cacheTTLms: number;
 	atrPeriod1m: number;
@@ -63,6 +64,8 @@ export interface UltraAggressiveBtcUsdtConfig {
 	maxDrawdownPerTradePct: number;
 	cooldownAfterStopoutBars: number;
 	dailyDrawdownLimitPct: number;
+	historyWindowCandles?: number;
+	warmupPeriods: Record<string, number>;
 }
 
 export interface UltraAggressiveDeps {

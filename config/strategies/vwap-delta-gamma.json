@@ -1,11 +1,20 @@
 {
 	"id": "vwap_delta_gamma",
 	"name": "VWAPDeltaGamma",
+	"symbol": "BTC/USDT",
 	"timeframes": {
 		"execution": "1m",
 		"trend": "5m",
 		"bias": "15m",
 		"macro": "1h"
+	},
+	"historyWindowCandles": 900,
+	"warmupPeriods": {
+		"default": 150,
+		"1m": 300,
+		"5m": 150,
+		"15m": 180,
+		"1h": 120
 	},
 	"atrPeriod1m": 14,
 	"atrPeriod5m": 14,
