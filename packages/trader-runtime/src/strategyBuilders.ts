@@ -2,7 +2,6 @@ import {
 	Candle,
 	MultiTimeframeCache,
 	PositionSide,
-	StrategyConfig,
 	StrategyId,
 	TradeIntent,
 	createLogger,
@@ -10,24 +9,20 @@ import {
 } from "@agenai/core";
 import { MexcClient } from "@agenai/exchange-mexc";
 import type { TraderStrategy } from "./types";
+import type {
+	StrategyRuntimeBuilder,
+	StrategyRuntimeBuilderContext,
+} from "./runtimeFactory";
 
 const logger = createLogger("strategy-builder");
-
-interface StrategyBuilderContext {
-	strategyConfig: StrategyConfig;
-	symbol: string;
-	timeframe: string;
-}
-
 export const resolveStrategyBuilder = (
 	strategyId: StrategyId,
-	context: StrategyBuilderContext
-): ((client: MexcClient) => Promise<TraderStrategy>) => {
-	return async (client: MexcClient): Promise<TraderStrategy> => {
-		let timeframes = deriveTimeframes(context.strategyConfig);
-		if (!timeframes.includes(context.timeframe)) {
-			timeframes = [...timeframes, context.timeframe];
-		}
+	client: MexcClient
+): StrategyRuntimeBuilder => {
+	return async (
+		context: StrategyRuntimeBuilderContext
+	): Promise<TraderStrategy> => {
+		const timeframes = deriveTimeframes(context);
 		const cacheTtl = (context.strategyConfig as { cacheTTLms?: number })
 			.cacheTTLms;
 		const { strategy, cache, manifest } = await loadStrategy({
@@ -36,7 +31,7 @@ export const resolveStrategyBuilder = (
 			cache: {
 				fetcher: (symbolArg: string, timeframeArg: string, limit: number) =>
 					client.fetchOHLCV(symbolArg, timeframeArg, limit),
-				symbol: context.symbol,
+				symbol: context.runtimeParams.symbol,
 				timeframes,
 				maxAgeMs: cacheTtl,
 			},
@@ -51,7 +46,7 @@ export const resolveStrategyBuilder = (
 		logger.info("strategy_adapter_initialized", {
 			strategyId,
 			strategyName: manifest.name,
-			symbol: context.symbol,
+			symbol: context.runtimeParams.symbol,
 			timeframes,
 			cacheTtlMs: cacheTtl ?? null,
 		});
@@ -82,15 +77,18 @@ class CacheBackedStrategyAdapter implements TraderStrategy {
 	}
 }
 
-const deriveTimeframes = (strategyConfig: StrategyConfig): string[] => {
+const deriveTimeframes = (context: StrategyRuntimeBuilderContext): string[] => {
+	if (context.trackedTimeframes.length) {
+		return [...context.trackedTimeframes];
+	}
 	const frameSet = new Set<string>();
 	if (
-		strategyConfig &&
-		typeof strategyConfig === "object" &&
-		"timeframes" in strategyConfig
+		context.strategyConfig &&
+		typeof context.strategyConfig === "object" &&
+		"timeframes" in context.strategyConfig
 	) {
 		const timeframes = (
-			strategyConfig as { timeframes?: Record<string, string> }
+			context.strategyConfig as { timeframes?: Record<string, string> }
 		).timeframes;
 		if (timeframes) {
 			for (const value of Object.values(timeframes)) {
@@ -100,7 +98,7 @@ const deriveTimeframes = (strategyConfig: StrategyConfig): string[] => {
 			}
 		}
 	}
-	const tracked = (strategyConfig as { trackedTimeframes?: unknown })
+	const tracked = (context.strategyConfig as { trackedTimeframes?: unknown })
 		.trackedTimeframes;
 	if (Array.isArray(tracked)) {
 		for (const tf of tracked) {
@@ -109,5 +107,6 @@ const deriveTimeframes = (strategyConfig: StrategyConfig): string[] => {
 			}
 		}
 	}
+	frameSet.add(context.runtimeParams.executionTimeframe);
 	return Array.from(frameSet);
 };

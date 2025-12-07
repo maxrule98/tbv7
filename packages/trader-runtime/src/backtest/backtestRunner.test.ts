@@ -5,7 +5,6 @@ import type {
 	Candle,
 	StrategyConfig,
 	TradeIntent,
-	UltraAggressiveBtcUsdtConfig,
 } from "@agenai/core";
 import type { MexcClient } from "@agenai/exchange-mexc";
 import { runBacktest } from "./backtestRunner";
@@ -62,7 +61,7 @@ const buildBacktestConfig = (
 });
 
 const createAgenaiConfig = (): AgenaiConfig => {
-	const strategyConfig: StrategyConfig = {
+	const strategyConfig = {
 		id: "ultra_aggressive_btc_usdt",
 		name: "Ultra Aggressive BTC/USDT",
 		symbol,
@@ -111,7 +110,7 @@ const createAgenaiConfig = (): AgenaiConfig => {
 			trailingAtrMultiple: 1,
 		},
 		maxTradeDurationMinutes: 60,
-	} as UltraAggressiveBtcUsdtConfig & { id: "ultra_aggressive_btc_usdt" };
+	} as unknown as StrategyConfig;
 
 	return {
 		env: {

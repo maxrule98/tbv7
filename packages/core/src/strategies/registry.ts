@@ -42,23 +42,54 @@ export interface StrategyDependencyMetadata<TConfig, TDeps> {
 type AnyStrategyEntry = StrategyRegistryEntry<any, any, any>;
 
 const MODULE_EXTENSIONS = [".js", ".cjs", ".mjs", ".ts", ".tsx"];
-const STRATEGY_SOURCE_DIR = __dirname;
+const STRATEGY_SOURCE_DIR =
+	process.env.AGENAI_STRATEGY_REGISTRY_DIR ?? __dirname;
 const IGNORED_DIRECTORIES = new Set(["__tests__"]);
 let tsRuntimeReady = false;
 
-const registryEntries = discoverStrategyEntries();
-const registryMap = new Map<StrategyId, AnyStrategyEntry>();
+let registryEntriesCache: AnyStrategyEntry[] | null = null;
+let registryMapCache: Map<StrategyId, AnyStrategyEntry> | null = null;
 
-for (const entry of registryEntries) {
-	if (registryMap.has(entry.id)) {
-		throw new Error(
-			`Duplicate strategy id detected: ${entry.id}. Strategy ids must be unique.`
+const registryProxyHandler: ProxyHandler<AnyStrategyEntry[]> = {
+	get(_target, prop) {
+		const entries = getRegistryEntries();
+		const value = Reflect.get(entries, prop);
+		return typeof value === "function" ? value.bind(entries) : value;
+	},
+	has(_target, prop) {
+		return Reflect.has(getRegistryEntries(), prop);
+	},
+	ownKeys() {
+		return Reflect.ownKeys(getRegistryEntries());
+	},
+	getOwnPropertyDescriptor(_target, prop) {
+		const descriptor = Object.getOwnPropertyDescriptor(
+			getRegistryEntries(),
+			prop
 		);
-	}
-	registryMap.set(entry.id, entry);
-}
+		if (descriptor) {
+			descriptor.configurable = true;
+		}
+		return descriptor;
+	},
+	getPrototypeOf() {
+		return Reflect.getPrototypeOf(getRegistryEntries());
+	},
+	set() {
+		throw new Error("strategyRegistry is read-only.");
+	},
+	defineProperty() {
+		throw new Error("strategyRegistry is read-only.");
+	},
+	deleteProperty() {
+		throw new Error("strategyRegistry is read-only.");
+	},
+};
 
-export const strategyRegistry: AnyStrategyEntry[] = registryEntries;
+export const strategyRegistry: AnyStrategyEntry[] = new Proxy(
+	[] as AnyStrategyEntry[],
+	registryProxyHandler
+);
 
 export const getStrategyDefinition = <
 	TConfig = unknown,
@@ -67,7 +98,7 @@ export const getStrategyDefinition = <
 >(
 	id: StrategyId
 ): StrategyRegistryEntry<TConfig, TDeps, TStrategy> => {
-	const definition = registryMap.get(id);
+	const definition = getRegistryMap().get(id);
 	if (!definition) {
 		throw new Error(`Unknown strategy id: ${id}`);
 	}
@@ -75,23 +106,37 @@ export const getStrategyDefinition = <
 };
 
 export const listStrategyDefinitions = (): AnyStrategyEntry[] => {
-	return [...registryEntries];
+	return [...getRegistryEntries()];
 };
 
 export const getRegisteredStrategyIds = (): StrategyId[] => {
-	return registryEntries.map((entry) => entry.id);
+	return getRegistryEntries().map((entry) => entry.id);
 };
 
 export const isRegisteredStrategyId = (value: unknown): value is StrategyId => {
-	return typeof value === "string" && registryMap.has(value as StrategyId);
+	return typeof value === "string" && getRegistryMap().has(value as StrategyId);
 };
 
 export const validateStrategyId = (value: string): StrategyId | null => {
 	return isRegisteredStrategyId(value) ? (value as StrategyId) : null;
 };
 
-function discoverStrategyEntries(): AnyStrategyEntry[] {
-	const dirents = fs.readdirSync(STRATEGY_SOURCE_DIR, {
+export function validateUniqueStrategyIds(
+	entries: StrategyRegistryEntry[]
+): void {
+	const seen = new Set<StrategyId>();
+	for (const entry of entries) {
+		if (seen.has(entry.id)) {
+			throw new Error(
+				`Duplicate strategy id detected: ${entry.id}. Strategy ids must be unique.`
+			);
+		}
+		seen.add(entry.id);
+	}
+}
+
+export function loadStrategyEntriesFrom(sourceDir: string): AnyStrategyEntry[] {
+	const dirents = fs.readdirSync(sourceDir, {
 		withFileTypes: true,
 	});
 	const entries: AnyStrategyEntry[] = [];
@@ -103,7 +148,7 @@ function discoverStrategyEntries(): AnyStrategyEntry[] {
 		if (IGNORED_DIRECTORIES.has(dirent.name) || dirent.name.startsWith(".")) {
 			continue;
 		}
-		const modulePath = resolveStrategyModulePath(dirent.name);
+		const modulePath = resolveStrategyModulePath(sourceDir, dirent.name);
 		if (!modulePath) {
 			throw new Error(
 				`Strategy directory ${dirent.name} is missing an index module. ` +
@@ -126,8 +171,11 @@ function discoverStrategyEntries(): AnyStrategyEntry[] {
 	return entries;
 }
 
-function resolveStrategyModulePath(dirName: string): string | null {
-	const basePath = path.join(STRATEGY_SOURCE_DIR, dirName, "index");
+function resolveStrategyModulePath(
+	sourceDir: string,
+	dirName: string
+): string | null {
+	const basePath = path.join(sourceDir, dirName, "index");
 	for (const ext of MODULE_EXTENSIONS) {
 		const candidate = `${basePath}${ext}`;
 		if (fs.existsSync(candidate)) {
@@ -183,4 +231,27 @@ function isStrategyRegistryEntry(value: unknown): value is AnyStrategyEntry {
 		typeof entry.manifest === "object" &&
 		entry.manifest !== null
 	);
+}
+
+function ensureRegistryLoaded(): void {
+	if (registryEntriesCache && registryMapCache) {
+		return;
+	}
+	const entries = loadStrategyEntriesFrom(STRATEGY_SOURCE_DIR);
+	validateUniqueStrategyIds(entries);
+	registryEntriesCache = entries;
+	registryMapCache = new Map();
+	for (const entry of entries) {
+		registryMapCache.set(entry.id, entry);
+	}
+}
+
+function getRegistryEntries(): AnyStrategyEntry[] {
+	ensureRegistryLoaded();
+	return registryEntriesCache!;
+}
+
+function getRegistryMap(): Map<StrategyId, AnyStrategyEntry> {
+	ensureRegistryLoaded();
+	return registryMapCache!;
 }

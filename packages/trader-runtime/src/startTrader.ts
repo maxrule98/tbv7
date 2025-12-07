@@ -5,7 +5,6 @@ import {
 	ExecutionMode,
 	RiskConfig,
 	StrategyId,
-	assertStrategyRuntimeParams,
 	loadAccountConfig,
 	loadAgenaiConfig,
 } from "@agenai/core";
@@ -38,6 +37,11 @@ import {
 	runtimeLogger,
 	snapshotPaperAccount,
 } from "./runtimeShared";
+import {
+	createStrategyRuntime,
+	resolveStrategyRuntimeMetadata,
+	type StrategyRuntimeBuilder,
+} from "./runtimeFactory";
 import type { TraderStrategy } from "./types";
 export type { TraderStrategy } from "./types";
 
@@ -63,7 +67,7 @@ export interface StartTraderOptions {
 	strategyProfile?: string;
 	riskProfile?: string;
 	strategyOverride?: TraderStrategy;
-	strategyBuilder?: (client: MexcClient) => Promise<TraderStrategy>;
+	strategyBuilder?: StrategyRuntimeBuilder;
 	dataProvider?: DataProvider;
 }
 
@@ -88,10 +92,18 @@ export const startTrader = async (
 		traderConfig.executionMode ?? agenaiConfig.env.executionMode ?? "paper";
 	const resolvedStrategyId =
 		traderConfig.strategyId ?? agenaiConfig.strategy.id;
-	const runtimeParams = assertStrategyRuntimeParams(agenaiConfig.strategy);
+	const runtimeMetadata = resolveStrategyRuntimeMetadata(
+		agenaiConfig.strategy,
+		{
+			instrument: {
+				symbol: traderConfig.symbol,
+				timeframe: traderConfig.timeframe,
+			},
+		}
+	);
 	const instrument = {
-		symbol: traderConfig.symbol ?? runtimeParams.symbol,
-		timeframe: traderConfig.timeframe ?? runtimeParams.executionTimeframe,
+		symbol: runtimeMetadata.runtimeParams.symbol,
+		timeframe: runtimeMetadata.runtimeParams.executionTimeframe,
 	};
 
 	const client = new MexcClient({
@@ -105,18 +117,18 @@ export const startTrader = async (
 
 	const effectiveBuilder =
 		options.strategyBuilder ??
-		resolveStrategyBuilder(resolvedStrategyId, {
-			strategyConfig: agenaiConfig.strategy,
-			symbol: instrument.symbol,
-			timeframe: instrument.timeframe,
-		});
+		resolveStrategyBuilder(resolvedStrategyId, client);
 
-	const strategySource: StrategySource = options.strategyOverride
-		? "override"
-		: "builder";
-	const strategy = options.strategyOverride
-		? options.strategyOverride
-		: await effectiveBuilder(client);
+	const runtime = await createStrategyRuntime({
+		strategyConfig: agenaiConfig.strategy,
+		strategyOverride: options.strategyOverride,
+		builder: effectiveBuilder,
+		metadata: runtimeMetadata,
+		builderName: options.strategyOverride
+			? undefined
+			: (options.strategyBuilder?.name ?? "live_strategy_builder"),
+	});
+	const { strategy, source: strategySource } = runtime;
 	const riskManager = new RiskManager(agenaiConfig.risk);
 	const paperAccount =
 		executionMode === "paper"
@@ -151,10 +163,7 @@ export const startTrader = async (
 			useTestnet: traderConfig.useTestnet,
 		},
 		executionMode,
-		builderName:
-			strategySource === "builder"
-				? (options.strategyBuilder?.name ?? effectiveBuilder.name)
-				: undefined,
+		builderName: runtime.builderName,
 		profiles: {
 			account: options.accountProfile,
 			strategy: options.strategyProfile,

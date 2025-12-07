@@ -1,7 +1,4 @@
-import type {
-	StrategyRegistryEntry,
-	StrategyRuntimeParams,
-} from "@agenai/core";
+import type { StrategyRegistryEntry } from "@agenai/core";
 import {
 	AccountConfig,
 	AgenaiConfig,
@@ -10,7 +7,6 @@ import {
 	StrategyConfig,
 	StrategyId,
 	TradeIntent,
-	assertStrategyRuntimeParams,
 	getStrategyDefinition,
 	loadAccountConfig,
 	loadAgenaiConfig,
@@ -53,6 +49,11 @@ import {
 	ExecutionHook,
 } from "../runtimeShared";
 import type { TraderStrategy } from "../types";
+import {
+	WarmupMap,
+	createStrategyRuntime,
+	resolveStrategyRuntimeMetadata,
+} from "../runtimeFactory";
 import { BacktestTimeframeCache } from "./BacktestTimeframeCache";
 import {
 	BacktestConfig,
@@ -75,8 +76,6 @@ export interface RunBacktestOptions {
 	dataProvider?: DataProvider;
 	timeframeData?: Record<string, Candle[]>;
 }
-
-type WarmupMap = Map<string, number>;
 
 export const runBacktest = async (
 	backtestConfig: BacktestConfig,
@@ -134,30 +133,26 @@ export const runBacktest = async (
 		}
 	}
 
-	const runtimeParams = assertStrategyRuntimeParams(agenaiConfig.strategy);
-	const symbol = backtestConfig.symbol ?? runtimeParams.symbol;
-	const timeframe =
-		backtestConfig.timeframe ?? runtimeParams.executionTimeframe;
+	const runtimeMetadata = resolveStrategyRuntimeMetadata(
+		agenaiConfig.strategy,
+		{
+			instrument: {
+				symbol: backtestConfig.symbol,
+				timeframe: backtestConfig.timeframe,
+			},
+			maxCandlesOverride: backtestConfig.maxCandles,
+		}
+	);
+	const { runtimeParams, trackedTimeframes, warmupByTimeframe, cacheLimit } =
+		runtimeMetadata;
+	const symbol = runtimeParams.symbol;
+	const timeframe = runtimeParams.executionTimeframe;
 	const effectiveConfig: BacktestResolvedConfig = {
 		...backtestConfig,
 		symbol,
 		timeframe,
 		strategyId: resolvedStrategyId,
 	};
-	const trackedTimeframes = collectStrategyTimeframes(
-		runtimeParams,
-		agenaiConfig.strategy,
-		timeframe
-	);
-	const warmupByTimeframe = deriveWarmupCandles(
-		agenaiConfig.strategy,
-		trackedTimeframes
-	);
-	const cacheLimit = determineCacheLimit(
-		agenaiConfig.strategy,
-		warmupByTimeframe,
-		effectiveConfig.maxCandles
-	);
 
 	const accountConfig =
 		options.accountConfig ??
@@ -218,12 +213,14 @@ export const runBacktest = async (
 		throw new Error("No candles loaded for execution timeframe");
 	}
 
-	const strategySource: StrategySource = options.strategyOverride
-		? "override"
-		: "builder";
-	const strategy = options.strategyOverride
-		? options.strategyOverride
-		: await createBacktestStrategy(agenaiConfig.strategy, cache);
+	const runtime = await createStrategyRuntime({
+		strategyConfig: agenaiConfig.strategy,
+		strategyOverride: options.strategyOverride,
+		builder: async () => createBacktestStrategy(agenaiConfig.strategy, cache),
+		metadata: runtimeMetadata,
+		builderName: options.strategyOverride ? undefined : "backtest_strategy",
+	});
+	const { strategy, source: strategySource } = runtime;
 
 	logStrategyLoaded({
 		source: strategySource,
@@ -238,7 +235,7 @@ export const runBacktest = async (
 			useTestnet: effectiveConfig.useTestnet ?? false,
 		},
 		executionMode: "paper",
-		builderName: strategySource === "builder" ? "backtest_strategy" : undefined,
+		builderName: runtime.builderName,
 		profiles: {
 			account: options.accountProfile,
 			strategy: strategyProfileForLoad,
@@ -401,99 +398,6 @@ export const runBacktest = async (
 	};
 };
 
-const collectStrategyTimeframes = (
-	runtimeParams: StrategyRuntimeParams,
-	strategyConfig: StrategyConfig,
-	executionTimeframe: string
-): string[] => {
-	const frames = new Set<string>();
-	const addFrame = (value?: string): void => {
-		if (typeof value !== "string") {
-			return;
-		}
-		const trimmed = value.trim();
-		if (trimmed.length) {
-			frames.add(trimmed);
-		}
-	};
-
-	addFrame(runtimeParams.executionTimeframe);
-	addFrame(executionTimeframe);
-	Object.values(runtimeParams.timeframes).forEach(addFrame);
-
-	const configTimeframes = (
-		strategyConfig as {
-			timeframes?: Record<string, string>;
-		}
-	).timeframes;
-	if (configTimeframes) {
-		Object.values(configTimeframes).forEach(addFrame);
-	}
-
-	const tracked = (strategyConfig as { trackedTimeframes?: unknown })
-		.trackedTimeframes;
-	if (Array.isArray(tracked)) {
-		tracked.forEach(addFrame);
-	}
-
-	return Array.from(frames);
-};
-
-const deriveWarmupCandles = (
-	strategyConfig: StrategyConfig,
-	trackedTimeframes: string[]
-): WarmupMap => {
-	const warmup = new Map<string, number>();
-	const warmupConfig = (
-		strategyConfig as {
-			warmupPeriods?: Record<string, number>;
-		}
-	).warmupPeriods;
-	const defaultWarmup = asNonNegativeInteger(warmupConfig?.default) ?? 0;
-
-	for (const timeframe of trackedTimeframes) {
-		const configuredValue = warmupConfig?.[timeframe];
-		const candles = asNonNegativeInteger(configuredValue) ?? defaultWarmup;
-		warmup.set(timeframe, candles);
-	}
-
-	return warmup;
-};
-
-const determineCacheLimit = (
-	strategyConfig: StrategyConfig,
-	warmupByTimeframe: WarmupMap,
-	maxCandlesOverride?: number
-): number => {
-	let warmupMax = 0;
-	for (const value of warmupByTimeframe.values()) {
-		warmupMax = Math.max(warmupMax, value);
-	}
-	const historyWindow = asPositiveInteger(
-		(strategyConfig as { historyWindowCandles?: number }).historyWindowCandles
-	);
-	const overrideLimit = asPositiveInteger(maxCandlesOverride);
-	const fallback = warmupMax > 0 ? warmupMax : 1;
-	const candidate = overrideLimit ?? historyWindow ?? fallback;
-	return Math.max(candidate, fallback);
-};
-
-const asNonNegativeInteger = (value?: number): number | undefined => {
-	if (typeof value !== "number" || !Number.isFinite(value)) {
-		return undefined;
-	}
-	const normalized = Math.floor(value);
-	return normalized >= 0 ? normalized : undefined;
-};
-
-const asPositiveInteger = (value?: number): number | undefined => {
-	const normalized = asNonNegativeInteger(value);
-	if (normalized === undefined || normalized === 0) {
-		return undefined;
-	}
-	return normalized;
-};
-
 const primeCacheWithWarmup = (
 	series: TimeframeSeries[],
 	cache: BacktestTimeframeCache,
@@ -610,10 +514,16 @@ const buildBacktestDependencies = <TConfig, TDeps, TStrategy>(
 	strategyConfig: StrategyConfig,
 	cache: BacktestTimeframeCache
 ): TDeps => {
-	if (entry.dependencies?.buildBacktestDeps) {
-		return entry.dependencies.buildBacktestDeps(strategyConfig as TConfig, {
-			cache,
-		});
+	const maybeBacktestDeps = (
+		entry.dependencies as {
+			buildBacktestDeps?: (
+				config: TConfig,
+				options: { cache: BacktestTimeframeCache }
+			) => TDeps;
+		}
+	)?.buildBacktestDeps;
+	if (maybeBacktestDeps) {
+		return maybeBacktestDeps(strategyConfig as TConfig, { cache });
 	}
 	if (entry.dependencies?.createCache) {
 		return { cache } as TDeps;

@@ -3,6 +3,7 @@ import path from "node:path";
 import dotenv from "dotenv";
 
 import type { StrategyId } from "./strategies/types";
+import { getStrategyDefinition } from "./strategies/registry";
 export type { StrategyId } from "./strategies/types";
 
 export interface StrategyConfig {
@@ -89,17 +90,6 @@ export interface ExchangeConfig extends ExchangeConfigFile {
 }
 
 // StrategyConfig interface declared near top
-
-type StrategyRegistryModule = typeof import("./strategies/registry");
-let cachedStrategyRegistry: StrategyRegistryModule | undefined;
-
-const getStrategyRegistry = (): StrategyRegistryModule => {
-	if (!cachedStrategyRegistry) {
-		// eslint-disable-next-line @typescript-eslint/no-var-requires
-		cachedStrategyRegistry = require("./strategies/registry");
-	}
-	return cachedStrategyRegistry!;
-};
 export interface RiskConfig {
 	maxLeverage: number;
 	riskPerTradePercent: number;
@@ -256,7 +246,7 @@ export const loadStrategyConfig = (
 			`Strategy config at ${strategyPath} must include an "id" property.`
 		);
 	}
-	getStrategyRegistry().getStrategyDefinition(strategyId);
+	getStrategyDefinition(strategyId);
 	return {
 		...file,
 		id: strategyId,

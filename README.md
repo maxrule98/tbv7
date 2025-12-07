@@ -139,6 +139,58 @@ Declare `warmupPeriods` (per timeframe candle counts) and `historyWindowCandles`
 
 ---
 
+## 🧱 Strategy Registry & Runtime Parity
+
+### Strategy registry lifecycle
+
+- Every strategy lives under `packages/core/src/strategies/<strategy-id>/` and exports a `StrategyRegistryEntry`.
+- The registry auto-discovers all directories at startup, rejects duplicate ids, and powers `pnpm strategy:list` plus config validation.
+- To add a new strategy:
+  1. Scaffold a new directory with an `index.ts` that exports the entry.
+  2. Declare a default profile name (used when no CLI override is provided).
+  3. Create a matching JSON config under `config/strategies/` with `id` pointing to the registry entry.
+
+### Shared strategy runtime
+
+- Both `startTrader` (live) and `runBacktest` hydrate strategies via the shared `createStrategyRuntime` factory in `@agenai/trader-runtime`.
+- The factory resolves the instrument symbol/timeframe, tracked timeframes, warmup windows, and cache limits exactly once, then feeds those artifacts into whichever runner invoked it.
+- This guarantees parity between live loops and backtests—any config metadata change is automatically honored everywhere without bespoke wiring.
+
+### Required strategy config fields
+
+Every strategy profile must include the following keys so the runtime can self-describe:
+
+- `id`: Must match a registry entry.
+- `symbol`: Default trading symbol (used when CLI flags omit overrides).
+- `timeframes.execution`: Primary loop timeframe.
+- `trackedTimeframes`: Optional array to declare extra caches; used by runtime parity.
+- `warmupPeriods`: Map of timeframe → candle count (`default` fallback is recommended).
+- `historyWindowCandles`: Upper bound for cache sizes and backtest timeframes when no explicit `maxCandles` is supplied.
+- `cacheTTLms`: Required for live trading so the runtime knows when to refresh MultiTimeframeCache instances.
+
+Missing any of the above will cause `loadStrategyConfig()` (and therefore every CLI) to fail fast with a descriptive validation error.
+
+### CLI usage examples
+
+The CLI entry points now consume the registry metadata end-to-end:
+
+```bash
+# List every registered strategy and its default profile
+pnpm strategy:list
+
+# Run a backtest with runtime metadata pulled from the registry
+pnpm --filter @agenai/backtest-cli start \
+  --strategyProfile ultra-aggressive-btc-usdt \
+  --start "2024-01-01T00:00:00Z" --end "2024-01-02T00:00:00Z"
+
+# Launch the trader using the same runtime factory used by backtests
+pnpm --filter @agenai/trader-cli dev --strategyProfile ultra-aggressive-btc-usdt
+```
+
+Because the CLI commands defer to the shared runtime factory, warmup windows, cache sizes, and tracked timeframes stay in sync between historical simulations and live execution.
+
+---
+
 ## ⚙️ Risk Config Example
 
 `config/risk/default.json`:

@@ -1,0 +1,10 @@
+{
+	"symbol": "BTC/USDT",
+	"timeframes": {
+		"execution": "1m"
+	},
+	"historyWindowCandles": 200,
+	"warmupPeriods": {
+		"default": 50
+	}
+}
