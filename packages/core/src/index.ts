@@ -5,7 +5,7 @@ export * from "./strategies/vwap-delta-gamma";
 export * from "./strategies/ultra-aggressive-btc-usdt";
 export * from "./strategies/registry";
 export * from "./strategies/loadStrategy";
-export * from "./strategies/ids";
+export * from "./strategies/types";
 export * from "./strategies/selection";
 export * from "./strategies/profiles";
 export * from "./strategies/runtimeConfig";

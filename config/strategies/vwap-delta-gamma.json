@@ -1,4 +1,5 @@
 {
+	"id": "vwap_delta_gamma",
 	"name": "VWAPDeltaGamma",
 	"timeframes": {
 		"execution": "1m",

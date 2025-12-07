@@ -1,5 +1,5 @@
 import { MultiTimeframeCache } from "../../data/multiTimeframeCache";
-import { StrategyId } from "../ids";
+import type { StrategyId } from "../types";
 
 export const VWAP_DELTA_GAMMA_ID: StrategyId = "vwap_delta_gamma";
 

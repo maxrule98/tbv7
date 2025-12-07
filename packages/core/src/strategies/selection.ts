@@ -1,4 +1,5 @@
-import { StrategyId, isStrategyId } from "./ids";
+import type { StrategyId } from "./types";
+import { validateStrategyId } from "./registry";
 
 export interface StrategySelectionInput {
 	requestedValue?: string;
@@ -30,7 +31,7 @@ const coerceStrategyId = (value?: string): StrategyId | null => {
 	if (!value) {
 		return null;
 	}
-	return isStrategyId(value) ? value : null;
+	return validateStrategyId(value);
 };
 
 export const resolveStrategySelection = (

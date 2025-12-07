@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { StrategyId } from "./ids";
+import type { StrategyId } from "./types";
 import { StrategyRegistryEntry, listStrategyDefinitions } from "./registry";
 
 const REQUIRED_FILES = [
@@ -43,7 +43,7 @@ const validateEntry = (
 	const missingFiles = directoryExists
 		? REQUIRED_FILES.filter(
 				(file) => !fs.existsSync(path.join(strategyDir, file))
-		  )
+			)
 		: [...REQUIRED_FILES];
 	const manifestMatchesId = entry.manifest.strategyId === entry.id;
 	const ok = directoryExists && missingFiles.length === 0 && manifestMatchesId;

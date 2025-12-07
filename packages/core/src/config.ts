@@ -2,10 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import dotenv from "dotenv";
 
-import type { StrategyId } from "./strategies/ids";
+import type { StrategyId } from "./strategies/types";
 import type { VWAPDeltaGammaConfig } from "./strategies/vwap-delta-gamma/config";
 import type { UltraAggressiveBtcUsdtConfig } from "./strategies/ultra-aggressive-btc-usdt/config";
-export type { StrategyId } from "./strategies/ids";
+export type { StrategyId } from "./strategies/types";
 
 let envLoaded = false;
 let loadedEnvPath: string | undefined;
@@ -23,12 +23,12 @@ interface ExchangeConfigFile {
 }
 
 type VwapStrategyConfigFile = VWAPDeltaGammaConfig & {
-	id?: StrategyId;
+	id: StrategyId;
 	symbol?: string;
 };
 
 type UltraAggressiveStrategyConfigFile = UltraAggressiveBtcUsdtConfig & {
-	id?: StrategyId;
+	id: StrategyId;
 	symbol?: string;
 };
 
@@ -78,6 +78,17 @@ export type StrategyConfig =
 			id: "ultra_aggressive_btc_usdt";
 			symbol?: string;
 	  });
+
+type StrategyRegistryModule = typeof import("./strategies/registry");
+let cachedStrategyRegistry: StrategyRegistryModule | undefined;
+
+const getStrategyRegistry = (): StrategyRegistryModule => {
+	if (!cachedStrategyRegistry) {
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		cachedStrategyRegistry = require("./strategies/registry");
+	}
+	return cachedStrategyRegistry!;
+};
 export interface RiskConfig {
 	maxLeverage: number;
 	riskPerTradePercent: number;
@@ -222,22 +233,19 @@ const resolveStrategyConfigPath = (
 	);
 };
 
-const inferStrategyIdFromProfile = (profile: string): StrategyId => {
-	if (profile.includes("ultra")) {
-		return "ultra_aggressive_btc_usdt";
-	}
-	return "vwap_delta_gamma";
-};
-
 export const loadStrategyConfig = (
 	strategyDir = getDefaultStrategyDir(),
 	strategyProfile = "vwap-delta-gamma"
 ): StrategyConfig => {
 	const strategyPath = resolveStrategyConfigPath(strategyDir, strategyProfile);
 	const file = readJsonFile<StrategyConfigFile>(strategyPath);
-	const strategyId =
-		(file.id as StrategyId | undefined) ??
-		inferStrategyIdFromProfile(strategyProfile);
+	const strategyId = file.id as StrategyId | undefined;
+	if (!strategyId) {
+		throw new Error(
+			`Strategy config at ${strategyPath} must include an "id" property.`
+		);
+	}
+	getStrategyRegistry().getStrategyDefinition(strategyId);
 	switch (strategyId) {
 		case "vwap_delta_gamma":
 			return {

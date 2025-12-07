@@ -1,4 +1,4 @@
-import { StrategyId } from "./ids";
+import type { StrategyId } from "./types";
 import { getStrategyDefinition } from "./registry";
 
 export const resolveStrategyProfileName = (

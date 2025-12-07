@@ -42,7 +42,7 @@ Options (all optional unless noted):
   --end <iso>              ISO timestamp for last candle (required)
   --symbol <symbol>        Trading pair (defaults to config default)
   --timeframe <tf>         Candle timeframe (defaults to config default)
-  --strategyId <id>        Strategy id (defaults to loaded config)
+	--strategyId <id>        Strategy id (use the config JSON id; defaults to loaded config)
   --maxCandles <number>    Limit candles for execution timeframe
   --initialBalance <usd>   Override starting balance
   --envPath <path>         Custom .env path

@@ -108,10 +108,13 @@ Produces:
 
 ## 🧪 Strategy Example
 
+Every strategy JSON file must declare an `id` that matches one of the registered modules (see `pnpm --filter @agenai/core run strategy:list`). This keeps CLI/runtime selection dynamic and avoids hardcoded ids.
+
 `config/strategies/macd_ar4.json`:
 
 ```json
 {
+	"id": "macd_ar4",
 	"symbol": "BTC/USDT",
 	"timeframe": "1m",
 	"indicators": {

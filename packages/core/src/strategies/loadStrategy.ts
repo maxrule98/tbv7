@@ -2,7 +2,7 @@ import {
 	MultiTimeframeCache,
 	MultiTimeframeCacheOptions,
 } from "../data/multiTimeframeCache";
-import { StrategyId } from "./ids";
+import type { StrategyId } from "./types";
 import {
 	StrategyManifestSummary,
 	StrategyRegistryEntry,
@@ -20,7 +20,7 @@ export interface LoadStrategyCacheOptions {
 export interface LoadStrategyOptions<
 	TConfig = unknown,
 	TDeps = unknown,
-	TStrategy = unknown
+	TStrategy = unknown,
 > {
 	strategyId: StrategyId;
 	config?: TConfig;
@@ -35,7 +35,7 @@ export interface LoadStrategyOptions<
 export interface LoadedStrategyResult<
 	TStrategy = unknown,
 	TConfig = unknown,
-	TDeps = unknown
+	TDeps = unknown,
 > {
 	id: StrategyId;
 	manifest: StrategyManifestSummary;
@@ -48,7 +48,7 @@ export interface LoadedStrategyResult<
 export const loadStrategy = async <
 	TConfig = unknown,
 	TDeps = unknown,
-	TStrategy = unknown
+	TStrategy = unknown,
 >(
 	options: LoadStrategyOptions<TConfig, TDeps, TStrategy>
 ): Promise<LoadedStrategyResult<TStrategy, TConfig, TDeps>> => {

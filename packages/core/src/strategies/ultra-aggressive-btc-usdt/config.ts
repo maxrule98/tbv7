@@ -1,5 +1,5 @@
 import { MultiTimeframeCache } from "../../data/multiTimeframeCache";
-import { StrategyId } from "../ids";
+import type { StrategyId } from "../types";
 
 export const ULTRA_AGGRESSIVE_ID: StrategyId = "ultra_aggressive_btc_usdt";
 
