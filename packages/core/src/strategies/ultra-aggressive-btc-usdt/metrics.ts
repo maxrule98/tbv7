@@ -1,4 +1,5 @@
 import { PositionSide } from "../../types";
+import { summarizeCandles } from "../../utils/fingerprint";
 import { createLogger } from "../../utils/logger";
 import { StrategyContextSnapshot, SetupDecision } from "./entryLogic";
 
@@ -33,6 +34,7 @@ export class UltraAggressiveMetrics {
 		if (!snapshot.setupDiagnostics.length) {
 			return;
 		}
+		const recentWindow = summarizeCandles(snapshot.recentExecutionCandles, 15);
 		this.logger.info("strategy_diagnostics", {
 			strategy: "UltraAggressiveBtcUsdt",
 			symbol: snapshot.symbol,
@@ -52,6 +54,7 @@ export class UltraAggressiveMetrics {
 			levels: snapshot.levels,
 			setups: snapshot.setups,
 			checks: snapshot.setupDiagnostics,
+			recentWindow,
 		});
 	}
 

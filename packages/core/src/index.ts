@@ -10,3 +10,4 @@ export * from "./strategies/selection";
 export * from "./strategies/profiles";
 export * from "./strategies/runtimeConfig";
 export * from "./utils/logger";
+export * from "./utils/fingerprint";

@@ -6,6 +6,8 @@ import {
 	StrategyId,
 	TradeIntent,
 	createLogger,
+	hashJson,
+	summarizeCandles,
 } from "@agenai/core";
 import {
 	ExecutionEngine,
@@ -15,6 +17,7 @@ import {
 } from "@agenai/execution-engine";
 import { RiskManager, TradePlan } from "@agenai/risk-engine";
 import type { TraderStrategy } from "./types";
+import type { StrategyRuntimeMetadata } from "./runtimeFactory";
 
 export const runtimeLogger = createLogger("trader-runtime");
 
@@ -46,6 +49,73 @@ export interface StrategyLogContext {
 		exchange?: string;
 	};
 }
+
+export type StrategyRuntimeMode = "backtest" | "paper" | "live";
+
+export interface StrategyRuntimeLogContext {
+	mode: StrategyRuntimeMode;
+	strategyId: StrategyId;
+	strategyConfig: StrategyConfig;
+	metadata: StrategyRuntimeMetadata;
+	source: StrategySource;
+	builderName?: string;
+	profiles?: StrategyLogContext["profiles"];
+	extra?: Record<string, unknown>;
+}
+
+export const logStrategyRuntimeMetadata = (
+	context: StrategyRuntimeLogContext
+): void => {
+	const warmupEntries = Array.from(
+		context.metadata.warmupByTimeframe.entries()
+	).map(([timeframe, candles]) => ({ timeframe, candles }));
+	runtimeLogger.info("strategy_runtime_metadata", {
+		mode: context.mode,
+		strategyId: context.strategyId,
+		configFingerprint: hashJson(context.strategyConfig),
+		execution: context.metadata.runtimeParams,
+		trackedTimeframes: context.metadata.trackedTimeframes,
+		warmupByTimeframe: warmupEntries,
+		cacheLimit: context.metadata.cacheLimit,
+		source: context.source,
+		builderName: context.builderName ?? null,
+		profiles: context.profiles ?? null,
+		extra: context.extra ?? null,
+	});
+};
+
+export interface TimeframeFingerprintContext {
+	mode: StrategyRuntimeMode;
+	label: string;
+	symbol: string;
+	timeframe: string;
+	candles: Candle[];
+	warmupCandles?: number;
+	windowMs?: number;
+}
+
+export const logTimeframeFingerprint = (
+	context: TimeframeFingerprintContext
+): void => {
+	const summary = summarizeCandles(context.candles, 20);
+	runtimeLogger.info("timeframe_fingerprint", {
+		mode: context.mode,
+		label: context.label,
+		symbol: context.symbol,
+		timeframe: context.timeframe,
+		warmupCandles: context.warmupCandles ?? null,
+		windowMs: context.windowMs ?? null,
+		candleCount: summary.count,
+		firstTimestamp: summary.firstTimestamp
+			? new Date(summary.firstTimestamp).toISOString()
+			: null,
+		lastTimestamp: summary.lastTimestamp
+			? new Date(summary.lastTimestamp).toISOString()
+			: null,
+		headHash: summary.headHash,
+		tailHash: summary.tailHash,
+	});
+};
 
 export const logStrategyLoaded = ({
 	source,
@@ -96,14 +166,41 @@ export const logStrategyDecision = (
 	candle: Candle,
 	intent: TradeIntent
 ): void => {
-	runtimeLogger.info("strategy_decision", {
+	const payload: Record<string, unknown> = {
 		symbol: candle.symbol,
 		timeframe: candle.timeframe,
 		timestamp: new Date(candle.timestamp).toISOString(),
 		close: candle.close,
 		intent: intent.intent,
 		reason: intent.reason,
-	});
+	};
+	const fingerprint = readConfigFingerprint(intent);
+	if (fingerprint) {
+		payload.configFingerprint = fingerprint;
+	}
+	const decisionContext = extractDecisionContext(intent);
+	if (decisionContext) {
+		payload.decisionContext = decisionContext;
+	}
+	runtimeLogger.info("strategy_decision", payload);
+};
+
+const readConfigFingerprint = (intent: TradeIntent): string | null => {
+	const value = intent.metadata?.configFingerprint as unknown;
+	return typeof value === "string" && value.length ? value : null;
+};
+
+const extractDecisionContext = (
+	intent: TradeIntent
+): Record<string, unknown> | null => {
+	if (intent.intent !== "NO_ACTION") {
+		return null;
+	}
+	const context = intent.metadata?.decisionContext as unknown;
+	if (!context || typeof context !== "object") {
+		return null;
+	}
+	return context as Record<string, unknown>;
 };
 
 export const logTradePlan = (

@@ -5,6 +5,7 @@ import {
 	MultiTimeframeCacheOptions,
 	createMTFCache,
 } from "../../data/multiTimeframeCache";
+import { hashJson, summarizeCandles } from "../../utils/fingerprint";
 import { Candle, PositionSide, TradeIntent } from "../../types";
 import {
 	UltraAggressiveBtcUsdtConfig,
@@ -24,6 +25,7 @@ import { UltraAggressiveMetrics } from "./metrics";
 
 export class UltraAggressiveBtcUsdtStrategy {
 	private positionMemory: PositionMemoryState | null = null;
+	private readonly configFingerprint: string;
 	private readonly metrics = new UltraAggressiveMetrics();
 	private cooldownBarsRemaining = 0;
 	private lastExitReason: string | null = null;
@@ -35,7 +37,9 @@ export class UltraAggressiveBtcUsdtStrategy {
 	constructor(
 		private readonly config: UltraAggressiveBtcUsdtConfig,
 		private readonly deps: UltraAggressiveDeps
-	) {}
+	) {
+		this.configFingerprint = hashJson(config);
+	}
 
 	async decide(position: PositionSide = "FLAT"): Promise<TradeIntent> {
 		const { execution, confirming, context } = this.config.timeframes;
@@ -75,11 +79,11 @@ export class UltraAggressiveBtcUsdtStrategy {
 		if (position === "FLAT") {
 			const blockReason = evaluateRiskBlocks(ctx, this.config);
 			if (blockReason) {
-				return this.noAction(blockReason, executionCandles);
+				return this.noAction(blockReason, executionCandles, ctx);
 			}
 			const entryDecision = selectEntryDecision(ctx, this.config);
 			if (!entryDecision) {
-				return this.noAction("no_signal", executionCandles);
+				return this.noAction("no_signal", executionCandles, ctx);
 			}
 			this.positionMemory = {
 				side: entryDecision.intent === "OPEN_LONG" ? "LONG" : "SHORT",
@@ -90,7 +94,7 @@ export class UltraAggressiveBtcUsdtStrategy {
 				bestFavorablePrice: latest.close,
 			};
 			this.metrics.emitEntry(ctx, entryDecision);
-			return this.buildIntent(latest, entryDecision);
+			return this.buildIntent(ctx, latest, entryDecision);
 		}
 
 		const exitResult = evaluateExitDecision(
@@ -106,10 +110,11 @@ export class UltraAggressiveBtcUsdtStrategy {
 			return exitResult.intent;
 		}
 
-		return this.noAction("manage_position", executionCandles);
+		return this.noAction("manage_position", executionCandles, ctx);
 	}
 
 	private buildIntent(
+		ctx: StrategyContextSnapshot,
 		latest: Candle,
 		decision: {
 			intent: TradeIntent["intent"];
@@ -130,17 +135,48 @@ export class UltraAggressiveBtcUsdtStrategy {
 				tp1: decision.tp1,
 				tp2: decision.tp2,
 				confidence: decision.confidence,
+				configFingerprint: this.configFingerprint,
+				decisionContext: this.buildDecisionContext(ctx),
 			},
 		};
 	}
 
-	private noAction(reason: string, candles: Candle[]): TradeIntent {
+	private buildDecisionContext(
+		ctx: StrategyContextSnapshot
+	): Record<string, unknown> {
+		const recentWindow = summarizeCandles(ctx.recentExecutionCandles, 15);
+		return {
+			timestamp: ctx.timestamp,
+			price: ctx.price,
+			trend: ctx.trendDirection,
+			volatility: ctx.volRegime,
+			riskState: ctx.riskState,
+			setups: ctx.setups,
+			diagnostics: ctx.setupDiagnostics,
+			recentWindow,
+		};
+	}
+
+	private noAction(
+		reason: string,
+		candles: Candle[],
+		ctx?: StrategyContextSnapshot
+	): TradeIntent {
 		const latest = candles[candles.length - 1];
+		const metadata = ctx
+			? {
+				configFingerprint: this.configFingerprint,
+				decisionContext: this.buildDecisionContext(ctx),
+			}
+			: {
+				configFingerprint: this.configFingerprint,
+			};
 		return {
 			symbol: latest?.symbol ?? this.config.symbol,
 			intent: "NO_ACTION",
 			reason,
 			timestamp: latest?.timestamp,
+			metadata,
 		};
 	}
 

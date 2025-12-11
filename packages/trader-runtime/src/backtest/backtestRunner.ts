@@ -41,6 +41,8 @@ import {
 	logRiskConfig,
 	logStrategyDecision,
 	logStrategyLoaded,
+	logStrategyRuntimeMetadata,
+	logTimeframeFingerprint,
 	logTradePlan,
 	maybeHandleForcedExit,
 	maybeHandleTrailingStop,
@@ -153,6 +155,12 @@ export const runBacktest = async (
 		timeframe,
 		strategyId: resolvedStrategyId,
 	};
+	const profileMetadata = {
+		account: options.accountProfile,
+		strategy: strategyProfileForLoad,
+		risk: options.riskProfile,
+		exchange: options.exchangeProfile,
+	};
 
 	const accountConfig =
 		options.accountConfig ??
@@ -199,6 +207,17 @@ export const runBacktest = async (
 				symbol,
 				timeframe
 			);
+	const timeframeLabel = options.timeframeData ? "provided_series" : "historical_load";
+	for (const series of timeframeSeries) {
+		logTimeframeFingerprint({
+			mode: "backtest",
+			label: timeframeLabel,
+			symbol,
+			timeframe: series.timeframe,
+			candles: series.candles,
+			warmupCandles: warmupByTimeframe.get(series.timeframe) ?? 0,
+		});
+	}
 
 	const cache = new BacktestTimeframeCache({
 		timeframes: trackedTimeframes,
@@ -221,6 +240,24 @@ export const runBacktest = async (
 		builderName: options.strategyOverride ? undefined : "backtest_strategy",
 	});
 	const { strategy, source: strategySource } = runtime;
+	logStrategyRuntimeMetadata({
+		mode: "backtest",
+		strategyId: resolvedStrategyId,
+		strategyConfig: agenaiConfig.strategy,
+		metadata: runtimeMetadata,
+		source: strategySource,
+		builderName: runtime.builderName,
+		profiles: profileMetadata,
+		extra: {
+			window: {
+				startTimestamp: effectiveConfig.startTimestamp,
+				endTimestamp: effectiveConfig.endTimestamp,
+			},
+			symbol,
+			timeframe,
+			maxCandles: effectiveConfig.maxCandles ?? null,
+		},
+	});
 
 	logStrategyLoaded({
 		source: strategySource,
@@ -236,12 +273,7 @@ export const runBacktest = async (
 		},
 		executionMode: "paper",
 		builderName: runtime.builderName,
-		profiles: {
-			account: options.accountProfile,
-			strategy: strategyProfileForLoad,
-			risk: options.riskProfile,
-			exchange: options.exchangeProfile,
-		},
+		profiles: profileMetadata,
 		pollIntervalMs: 0,
 	});
 	logRiskConfig(agenaiConfig.risk);

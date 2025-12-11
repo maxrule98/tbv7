@@ -18,6 +18,7 @@ import { ExecutionEngine, PaperAccount } from "@agenai/execution-engine";
 import { RiskManager } from "@agenai/risk-engine";
 import { resolveStrategyBuilder } from "./strategyBuilders";
 import {
+	StrategyRuntimeMode,
 	StrategySource,
 	calculateUnrealizedPnl,
 	enrichIntentMetadata,
@@ -31,6 +32,8 @@ import {
 	logRiskConfig,
 	logStrategyDecision,
 	logStrategyLoaded,
+	logStrategyRuntimeMetadata,
+	logTimeframeFingerprint,
 	logTradePlan,
 	maybeHandleForcedExit,
 	maybeHandleTrailingStop,
@@ -47,6 +50,7 @@ export type { TraderStrategy } from "./types";
 
 export const DEFAULT_POLL_INTERVAL_MS = 10_000;
 const BOOTSTRAP_CANDLE_LIMIT = 300;
+const FIFTEEN_MIN_MS = 15 * 60 * 1000;
 
 export interface TraderConfig {
 	symbol?: string;
@@ -105,6 +109,12 @@ export const startTrader = async (
 		symbol: runtimeMetadata.runtimeParams.symbol,
 		timeframe: runtimeMetadata.runtimeParams.executionTimeframe,
 	};
+	const profileMetadata = {
+		account: options.accountProfile,
+		strategy: options.strategyProfile,
+		risk: options.riskProfile,
+		exchange: options.exchangeProfile,
+	};
 
 	const client = new MexcClient({
 		apiKey: agenaiConfig.exchange.credentials.apiKey,
@@ -129,6 +139,20 @@ export const startTrader = async (
 			: (options.strategyBuilder?.name ?? "live_strategy_builder"),
 	});
 	const { strategy, source: strategySource } = runtime;
+	logStrategyRuntimeMetadata({
+		mode: executionMode,
+		strategyId: resolvedStrategyId,
+		strategyConfig: agenaiConfig.strategy,
+		metadata: runtimeMetadata,
+		source: strategySource,
+		builderName: runtime.builderName,
+		profiles: profileMetadata,
+		extra: {
+			symbol: instrument.symbol,
+			timeframe: instrument.timeframe,
+			pollIntervalMs: traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+		},
+	});
 	const riskManager = new RiskManager(agenaiConfig.risk);
 	const paperAccount =
 		executionMode === "paper"
@@ -164,12 +188,7 @@ export const startTrader = async (
 		},
 		executionMode,
 		builderName: runtime.builderName,
-		profiles: {
-			account: options.accountProfile,
-			strategy: options.strategyProfile,
-			risk: options.riskProfile,
-			exchange: options.exchangeProfile,
-		},
+		profiles: profileMetadata,
 		pollIntervalMs: traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
 	});
 	logRiskConfig(agenaiConfig.risk);
@@ -177,13 +196,22 @@ export const startTrader = async (
 	const candlesBySymbol = new Map<string, Candle[]>();
 	const lastTimestampBySymbol = new Map<string, number>();
 
-	await bootstrapCandles(
+	const bootstrapWindow = await bootstrapCandles(
 		dataProvider,
 		instrument.symbol,
 		instrument.timeframe,
 		candlesBySymbol,
 		lastTimestampBySymbol
 	);
+	if (bootstrapWindow.length) {
+		logTimeframeFingerprint({
+			mode: executionMode,
+			label: "live_bootstrap",
+			symbol: instrument.symbol,
+			timeframe: instrument.timeframe,
+			candles: bootstrapWindow,
+		});
+	}
 
 	return startPolling(
 		dataProvider,
@@ -196,7 +224,8 @@ export const startTrader = async (
 		instrument.timeframe,
 		candlesBySymbol,
 		lastTimestampBySymbol,
-		traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
+		traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+		executionMode
 	);
 };
 
@@ -206,7 +235,7 @@ const bootstrapCandles = async (
 	timeframe: string,
 	candlesBySymbol: Map<string, Candle[]>,
 	lastTimestampBySymbol: Map<string, number>
-): Promise<void> => {
+): Promise<Candle[]> => {
 	const now = Date.now();
 	const windowMs = timeframeToMs(timeframe) * (BOOTSTRAP_CANDLE_LIMIT + 5);
 	const startTimestamp = Math.max(0, now - windowMs);
@@ -226,7 +255,7 @@ const bootstrapCandles = async (
 		const candles = series?.candles ?? [];
 		if (!candles.length) {
 			runtimeLogger.warn("bootstrap_no_candles", { symbol, timeframe });
-			return;
+			return [];
 		}
 
 		const trimmed =
@@ -244,8 +273,10 @@ const bootstrapCandles = async (
 			timeframe,
 			count: trimmed.length,
 		});
+		return trimmed;
 	} catch (error) {
 		logMarketDataError(error);
+		return [];
 	}
 };
 
@@ -260,7 +291,8 @@ const startPolling = async (
 	timeframe: string,
 	candlesBySymbol: Map<string, Candle[]>,
 	lastTimestampBySymbol: Map<string, number>,
-	pollIntervalMs: number
+	pollIntervalMs: number,
+	runtimeMode: StrategyRuntimeMode
 ): Promise<never> => {
 	let fallbackEquity = defaultEquity;
 	const subscription = dataProvider.createLiveSubscription({
@@ -271,6 +303,7 @@ const startPolling = async (
 	});
 
 	let queue = Promise.resolve();
+	let lastFingerprintLogged = 0;
 
 	const processCandle = async (latest: Candle): Promise<void> => {
 		const lastTimestamp = lastTimestampBySymbol.get(symbol);
@@ -286,6 +319,17 @@ const startPolling = async (
 		lastTimestampBySymbol.set(symbol, latest.timestamp);
 		const buffer = appendCandle(candlesBySymbol, latest);
 		logCandle(latest);
+		if (latest.timestamp - lastFingerprintLogged >= FIFTEEN_MIN_MS) {
+			logTimeframeFingerprint({
+				mode: runtimeMode,
+				label: "live_window",
+				symbol,
+				timeframe,
+				candles: buffer,
+				windowMs: FIFTEEN_MIN_MS,
+			});
+			lastFingerprintLogged = latest.timestamp;
+		}
 
 		const positionState = executionEngine.getPosition(symbol);
 		const unrealizedPnl = calculateUnrealizedPnl(positionState, latest.close);
