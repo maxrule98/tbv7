@@ -1,14 +1,10 @@
 import http from "http";
+import { createLogger } from "@agenai/core";
 import {
-	StrategyConfig,
-	StrategyId,
-	assertStrategyRuntimeParams,
-	createLogger,
-	getStrategyDefinition,
-	loadAgenaiConfig,
-	resolveStrategySelection,
-} from "@agenai/core";
-import { startTrader } from "@agenai/trader-runtime";
+	createRuntimeSnapshot,
+	loadRuntimeConfig,
+	startTrader,
+} from "@agenai/runtime";
 
 const logger = createLogger("trader-server");
 
@@ -18,42 +14,33 @@ const main = async (): Promise<void> => {
 		pid: process.pid,
 	});
 
-	const config = loadAgenaiConfig();
-	const exchange = config.exchange;
-	const defaultStrategyId = config.strategy.id as StrategyId;
 	const argv = process.argv.slice(2);
-
-	const selection = resolveStrategySelection({
-		requestedValue: getStrategyArg(argv),
-		envValue: process.env.TRADER_STRATEGY,
-		defaultStrategyId,
+	const runtimeBootstrap = loadRuntimeConfig({
+		requestedStrategyId: getStrategyArg(argv),
+		envStrategyId: process.env.TRADER_STRATEGY,
+	});
+	const runtimeSnapshot = createRuntimeSnapshot({
+		runtimeConfig: runtimeBootstrap,
 	});
 
-	selection.invalidSources.forEach(({ source, value }) =>
+	runtimeBootstrap.selection.invalidSources.forEach(({ source, value }) =>
 		logger.warn("server_strategy_invalid", { source, value })
 	);
 
-	let strategyConfig = config.strategy as StrategyConfig;
-	if (selection.resolvedStrategyId !== strategyConfig.id) {
-		const definition = getStrategyDefinition<StrategyConfig>(
-			selection.resolvedStrategyId
-		);
-		strategyConfig = definition.loadConfig();
-		config.strategy = strategyConfig;
-	}
-	const runtimeParams = assertStrategyRuntimeParams(strategyConfig);
+	const runtimeParams = runtimeSnapshot.metadata.runtimeParams;
 	const symbol = runtimeParams.symbol;
 	const timeframe = runtimeParams.executionTimeframe;
+	const exchange = runtimeBootstrap.agenaiConfig.exchange;
 
 	startTrader(
 		{
 			symbol,
 			timeframe,
 			useTestnet: exchange.testnet ?? false,
-			executionMode: config.env.executionMode,
-			strategyId: selection.resolvedStrategyId,
+			executionMode: runtimeBootstrap.agenaiConfig.env.executionMode,
+			strategyId: runtimeBootstrap.strategyId,
 		},
-		{ agenaiConfig: config }
+		{ runtimeSnapshot }
 	).catch((error) => {
 		logger.error("runtime_failed", {
 			message: error instanceof Error ? error.message : String(error),

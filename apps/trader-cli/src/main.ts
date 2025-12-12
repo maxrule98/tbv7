@@ -1,51 +1,40 @@
+import { StrategyId, createLogger } from "@agenai/core";
 import {
-	StrategyConfig,
-	StrategyId,
-	assertStrategyRuntimeParams,
-	createLogger,
-	getStrategyDefinition,
-	loadAgenaiConfig,
-	resolveStrategySelection,
-} from "@agenai/core";
-import { startTrader } from "@agenai/trader-runtime";
+	createRuntimeSnapshot,
+	loadRuntimeConfig,
+	startTrader,
+} from "@agenai/runtime";
 
 const logger = createLogger("trader-cli");
 
 const main = async (): Promise<void> => {
-	const config = loadAgenaiConfig();
-	const exchange = config.exchange;
 	const argv = process.argv.slice(2);
-	const defaultStrategyId = config.strategy.id as StrategyId;
-
-	const selection = resolveStrategySelection({
-		requestedValue: getStrategyArg(argv),
-		envValue: process.env.TRADER_STRATEGY,
-		defaultStrategyId,
+	const runtimeBootstrap = loadRuntimeConfig({
+		requestedStrategyId: getStrategyArg(argv),
+		envStrategyId: process.env.TRADER_STRATEGY,
+	});
+	const runtimeSnapshot = createRuntimeSnapshot({
+		runtimeConfig: runtimeBootstrap,
 	});
 
-	selection.invalidSources.forEach(({ source, value }) =>
+	runtimeBootstrap.selection.invalidSources.forEach(({ source, value }) =>
 		logger.warn("cli_strategy_invalid", { source, value })
 	);
 
-	let strategyConfig = config.strategy as StrategyConfig;
-	if (selection.resolvedStrategyId !== strategyConfig.id) {
-		const definition = getStrategyDefinition<StrategyConfig>(
-			selection.resolvedStrategyId
-		);
-		strategyConfig = definition.loadConfig();
-		config.strategy = strategyConfig;
-	}
-	const runtimeParams = assertStrategyRuntimeParams(strategyConfig);
+	const runtimeParams = runtimeSnapshot.metadata.runtimeParams;
 	const symbol = runtimeParams.symbol;
 	const timeframe = runtimeParams.executionTimeframe;
+	const exchange = runtimeBootstrap.agenaiConfig.exchange;
+	const resolvedStrategyId = runtimeBootstrap.strategyId as StrategyId;
+	const defaultStrategyId = runtimeBootstrap.strategyConfig.id as StrategyId;
 
 	logger.info("cli_starting", {
 		defaultStrategyId,
-		resolvedStrategyId: selection.resolvedStrategyId,
+		resolvedStrategyId,
 		symbol,
 		timeframe,
-		requestedStrategy: selection.requestedValue ?? null,
-		envStrategy: selection.envValue ?? null,
+		requestedStrategy: runtimeBootstrap.selection.requestedValue ?? null,
+		envStrategy: runtimeBootstrap.selection.envValue ?? null,
 		useTestnet: exchange.testnet ?? false,
 	});
 
@@ -54,10 +43,10 @@ const main = async (): Promise<void> => {
 			symbol,
 			timeframe,
 			useTestnet: exchange.testnet ?? false,
-			executionMode: config.env.executionMode,
-			strategyId: selection.resolvedStrategyId,
+			executionMode: runtimeBootstrap.agenaiConfig.env.executionMode,
+			strategyId: resolvedStrategyId,
 		},
-		{ agenaiConfig: config }
+		{ runtimeSnapshot }
 	);
 };
 

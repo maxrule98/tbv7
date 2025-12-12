@@ -5,8 +5,6 @@ import {
 	ExecutionMode,
 	RiskConfig,
 	StrategyId,
-	loadAccountConfig,
-	loadAgenaiConfig,
 } from "@agenai/core";
 import {
 	DefaultDataProvider,
@@ -40,12 +38,14 @@ import {
 	runtimeLogger,
 	snapshotPaperAccount,
 } from "./runtimeShared";
-import {
-	createStrategyRuntime,
-	resolveStrategyRuntimeMetadata,
-	type StrategyRuntimeBuilder,
-} from "./runtimeFactory";
+import type { StrategyRuntimeBuilder } from "./runtimeFactory";
 import type { TraderStrategy } from "./types";
+import type { LoadedRuntimeConfig } from "./loadRuntimeConfig";
+import {
+	createRuntimeSnapshot,
+	createRuntime,
+	type RuntimeSnapshot,
+} from "./runtimeSnapshot";
 export type { TraderStrategy } from "./types";
 
 export const DEFAULT_POLL_INTERVAL_MS = 10_000;
@@ -62,6 +62,8 @@ export interface TraderConfig {
 }
 
 export interface StartTraderOptions {
+	runtimeSnapshot?: RuntimeSnapshot;
+	runtimeConfig?: LoadedRuntimeConfig;
 	agenaiConfig?: AgenaiConfig;
 	accountConfig?: AccountConfig;
 	accountProfile?: string;
@@ -79,42 +81,37 @@ export const startTrader = async (
 	traderConfig: TraderConfig,
 	options: StartTraderOptions = {}
 ): Promise<never> => {
-	const agenaiConfig =
-		options.agenaiConfig ??
-		loadAgenaiConfig({
-			envPath: options.envPath,
+	const runtimeSnapshot =
+		options.runtimeSnapshot ??
+		createRuntimeSnapshot({
+			runtimeConfig: options.runtimeConfig,
+			agenaiConfig: options.agenaiConfig,
+			accountConfig: options.accountConfig,
+			accountProfile: options.accountProfile,
 			configDir: options.configDir,
+			envPath: options.envPath,
 			exchangeProfile: options.exchangeProfile,
 			strategyProfile: options.strategyProfile,
 			riskProfile: options.riskProfile,
-		});
-	const accountConfig =
-		options.accountConfig ??
-		loadAccountConfig(options.configDir, options.accountProfile ?? "paper");
-
-	const executionMode =
-		traderConfig.executionMode ?? agenaiConfig.env.executionMode ?? "paper";
-	const resolvedStrategyId =
-		traderConfig.strategyId ?? agenaiConfig.strategy.id;
-	const runtimeMetadata = resolveStrategyRuntimeMetadata(
-		agenaiConfig.strategy,
-		{
+			requestedStrategyId: traderConfig.strategyId,
 			instrument: {
 				symbol: traderConfig.symbol,
 				timeframe: traderConfig.timeframe,
 			},
-		}
-	);
+		});
+
+	const runtimeBootstrap = runtimeSnapshot.config;
+	const agenaiConfig = runtimeBootstrap.agenaiConfig;
+	const accountConfig = runtimeBootstrap.accountConfig;
+	const executionMode =
+		traderConfig.executionMode ?? agenaiConfig.env.executionMode ?? "paper";
+	const resolvedStrategyId = runtimeBootstrap.strategyId;
+	const runtimeMetadata = runtimeSnapshot.metadata;
 	const instrument = {
 		symbol: runtimeMetadata.runtimeParams.symbol,
 		timeframe: runtimeMetadata.runtimeParams.executionTimeframe,
 	};
-	const profileMetadata = {
-		account: options.accountProfile,
-		strategy: options.strategyProfile,
-		risk: options.riskProfile,
-		exchange: options.exchangeProfile,
-	};
+	const profileMetadata = runtimeBootstrap.profiles;
 
 	const client = new MexcClient({
 		apiKey: agenaiConfig.exchange.credentials.apiKey,
@@ -129,11 +126,9 @@ export const startTrader = async (
 		options.strategyBuilder ??
 		resolveStrategyBuilder(resolvedStrategyId, client);
 
-	const runtime = await createStrategyRuntime({
-		strategyConfig: agenaiConfig.strategy,
+	const runtime = await createRuntime(runtimeSnapshot, {
 		strategyOverride: options.strategyOverride,
 		builder: effectiveBuilder,
-		metadata: runtimeMetadata,
 		builderName: options.strategyOverride
 			? undefined
 			: (options.strategyBuilder?.name ?? "live_strategy_builder"),
@@ -143,6 +138,7 @@ export const startTrader = async (
 		mode: executionMode,
 		strategyId: resolvedStrategyId,
 		strategyConfig: agenaiConfig.strategy,
+		configFingerprint: runtimeSnapshot.configFingerprint,
 		metadata: runtimeMetadata,
 		source: strategySource,
 		builderName: runtime.builderName,

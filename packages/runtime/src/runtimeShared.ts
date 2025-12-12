@@ -6,7 +6,6 @@ import {
 	StrategyId,
 	TradeIntent,
 	createLogger,
-	hashJson,
 	summarizeCandles,
 } from "@agenai/core";
 import {
@@ -56,6 +55,7 @@ export interface StrategyRuntimeLogContext {
 	mode: StrategyRuntimeMode;
 	strategyId: StrategyId;
 	strategyConfig: StrategyConfig;
+	configFingerprint: string;
 	metadata: StrategyRuntimeMetadata;
 	source: StrategySource;
 	builderName?: string;
@@ -72,7 +72,7 @@ export const logStrategyRuntimeMetadata = (
 	runtimeLogger.info("strategy_runtime_metadata", {
 		mode: context.mode,
 		strategyId: context.strategyId,
-		configFingerprint: hashJson(context.strategyConfig),
+		configFingerprint: context.configFingerprint,
 		execution: context.metadata.runtimeParams,
 		trackedTimeframes: context.metadata.trackedTimeframes,
 		warmupByTimeframe: warmupEntries,
@@ -531,7 +531,7 @@ export const maybeHandleTrailingStop = async (
 	const entryPrice =
 		positionState.entryPrice > 0
 			? positionState.entryPrice
-			: positionState.avgEntryPrice ?? 0;
+			: (positionState.avgEntryPrice ?? 0);
 	if (entryPrice <= 0) {
 		return false;
 	}
@@ -551,7 +551,7 @@ export const maybeHandleTrailingStop = async (
 	let trailingStopPrice =
 		positionState.trailingStopPrice > 0
 			? positionState.trailingStopPrice
-			: positionState.stopLossPrice ?? 0;
+			: (positionState.stopLossPrice ?? 0);
 	const updates: Partial<PaperPositionSnapshot> = {};
 
 	const activationBarrier = isLong

@@ -8,10 +8,6 @@ import {
 	StrategyId,
 	TradeIntent,
 	getStrategyDefinition,
-	loadAccountConfig,
-	loadAgenaiConfig,
-	loadStrategyConfig,
-	resolveStrategyProfileName,
 } from "@agenai/core";
 import {
 	DefaultDataProvider,
@@ -51,11 +47,13 @@ import {
 	ExecutionHook,
 } from "../runtimeShared";
 import type { TraderStrategy } from "../types";
+import { WarmupMap } from "../runtimeFactory";
+import type { LoadedRuntimeConfig } from "../loadRuntimeConfig";
 import {
-	WarmupMap,
-	createStrategyRuntime,
-	resolveStrategyRuntimeMetadata,
-} from "../runtimeFactory";
+	createRuntimeSnapshot,
+	createRuntime,
+	type RuntimeSnapshot,
+} from "../runtimeSnapshot";
 import { BacktestTimeframeCache } from "./BacktestTimeframeCache";
 import {
 	BacktestConfig,
@@ -65,6 +63,8 @@ import {
 } from "./backtestTypes";
 
 export interface RunBacktestOptions {
+	runtimeSnapshot?: RuntimeSnapshot;
+	runtimeConfig?: LoadedRuntimeConfig;
 	agenaiConfig?: AgenaiConfig;
 	accountConfig?: AccountConfig;
 	accountProfile?: string;
@@ -87,64 +87,34 @@ export const runBacktest = async (
 		throw new Error("Backtest startTimestamp must be before endTimestamp");
 	}
 
-	const agenaiConfig =
-		options.agenaiConfig ??
-		loadAgenaiConfig({
-			envPath: options.envPath,
+	const runtimeSnapshot =
+		options.runtimeSnapshot ??
+		createRuntimeSnapshot({
+			runtimeConfig: options.runtimeConfig,
+			agenaiConfig: options.agenaiConfig,
+			accountConfig: options.accountConfig,
+			accountProfile: options.accountProfile,
 			configDir: options.configDir,
+			envPath: options.envPath,
 			exchangeProfile: options.exchangeProfile,
 			strategyProfile: options.strategyProfile,
 			riskProfile: options.riskProfile,
-		});
-
-	const resolvedStrategyId =
-		backtestConfig.strategyId ?? agenaiConfig.strategy.id;
-	const strategyProfileForLoad = resolveStrategyProfileName(
-		resolvedStrategyId,
-		options.strategyProfile
-	);
-
-	if (agenaiConfig.strategy.id !== resolvedStrategyId) {
-		runtimeLogger.warn("backtest_strategy_mismatch", {
-			requestedStrategy: resolvedStrategyId,
-			loadedStrategy: agenaiConfig.strategy.id,
-		});
-		const fallbackProfile = strategyProfileForLoad;
-		try {
-			const reloadedStrategy = loadStrategyConfig(
-				options.configDir,
-				fallbackProfile
-			);
-			if (reloadedStrategy.id !== resolvedStrategyId) {
-				throw new Error(
-					`profile ${fallbackProfile} resolved to ${reloadedStrategy.id}`
-				);
-			}
-			agenaiConfig.strategy = reloadedStrategy;
-			runtimeLogger.info("backtest_strategy_config_reloaded", {
-				requestedStrategy: resolvedStrategyId,
-				reloadedProfile: fallbackProfile,
-				configDir: options.configDir ?? null,
-			});
-		} catch (error) {
-			const message = error instanceof Error ? error.message : "unknown_error";
-			throw new Error(
-				`Failed to load config for strategy ${resolvedStrategyId}. ` +
-					`Provide a matching --strategyProfile or ensure config exists. (${message})`
-			);
-		}
-	}
-
-	const runtimeMetadata = resolveStrategyRuntimeMetadata(
-		agenaiConfig.strategy,
-		{
+			requestedStrategyId: backtestConfig.strategyId,
 			instrument: {
 				symbol: backtestConfig.symbol,
 				timeframe: backtestConfig.timeframe,
 			},
 			maxCandlesOverride: backtestConfig.maxCandles,
-		}
+		});
+
+	runtimeSnapshot.config.selection.invalidSources.forEach(({ source, value }) =>
+		runtimeLogger.warn("backtest_strategy_invalid", { source, value })
 	);
+
+	const runtimeBootstrap = runtimeSnapshot.config;
+	const agenaiConfig = runtimeBootstrap.agenaiConfig;
+	const resolvedStrategyId = runtimeBootstrap.strategyId;
+	const runtimeMetadata = runtimeSnapshot.metadata;
 	const { runtimeParams, trackedTimeframes, warmupByTimeframe, cacheLimit } =
 		runtimeMetadata;
 	const symbol = runtimeParams.symbol;
@@ -155,16 +125,9 @@ export const runBacktest = async (
 		timeframe,
 		strategyId: resolvedStrategyId,
 	};
-	const profileMetadata = {
-		account: options.accountProfile,
-		strategy: strategyProfileForLoad,
-		risk: options.riskProfile,
-		exchange: options.exchangeProfile,
-	};
+	const profileMetadata = runtimeBootstrap.profiles;
 
-	const accountConfig =
-		options.accountConfig ??
-		loadAccountConfig(options.configDir, options.accountProfile ?? "paper");
+	const accountConfig = runtimeBootstrap.accountConfig;
 
 	const client =
 		options.client ??
@@ -207,7 +170,9 @@ export const runBacktest = async (
 				symbol,
 				timeframe
 			);
-	const timeframeLabel = options.timeframeData ? "provided_series" : "historical_load";
+	const timeframeLabel = options.timeframeData
+		? "provided_series"
+		: "historical_load";
 	for (const series of timeframeSeries) {
 		logTimeframeFingerprint({
 			mode: "backtest",
@@ -232,11 +197,9 @@ export const runBacktest = async (
 		throw new Error("No candles loaded for execution timeframe");
 	}
 
-	const runtime = await createStrategyRuntime({
-		strategyConfig: agenaiConfig.strategy,
+	const runtime = await createRuntime(runtimeSnapshot, {
 		strategyOverride: options.strategyOverride,
 		builder: async () => createBacktestStrategy(agenaiConfig.strategy, cache),
-		metadata: runtimeMetadata,
 		builderName: options.strategyOverride ? undefined : "backtest_strategy",
 	});
 	const { strategy, source: strategySource } = runtime;
@@ -244,6 +207,7 @@ export const runBacktest = async (
 		mode: "backtest",
 		strategyId: resolvedStrategyId,
 		strategyConfig: agenaiConfig.strategy,
+		configFingerprint: runtimeSnapshot.configFingerprint,
 		metadata: runtimeMetadata,
 		source: strategySource,
 		builderName: runtime.builderName,

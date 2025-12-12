@@ -5,16 +5,14 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import process from "node:process";
+import { StrategyId, getWorkspaceRoot } from "@agenai/core";
 import {
-	StrategyConfig,
-	StrategyId,
-	assertStrategyRuntimeParams,
-	getWorkspaceRoot,
-	loadAgenaiConfig,
-	loadStrategyConfig,
-	resolveStrategyProfileName,
-} from "@agenai/core";
-import { BacktestConfig, runBacktest } from "@agenai/trader-runtime";
+	BacktestConfig,
+	createRuntimeSnapshot,
+	loadRuntimeConfig,
+	runBacktest,
+	type RuntimeProfileMetadata,
+} from "@agenai/runtime";
 
 type ArgValue = string | boolean;
 
@@ -26,12 +24,7 @@ interface PersistContext {
 	timeframe: string;
 	startTimestamp: number;
 	endTimestamp: number;
-	profiles: {
-		accountProfile?: string;
-		strategyProfile?: string;
-		riskProfile?: string;
-		exchangeProfile?: string;
-	};
+	profiles: RuntimeProfileMetadata;
 	strategyConfig: unknown;
 }
 
@@ -191,40 +184,46 @@ const main = async (): Promise<void> => {
 
 	const envPath = (argMap.envPath as string) ?? (argMap.env as string);
 	const configDir = argMap.configDir as string | undefined;
-	const profiles = {
+	const runtimeBootstrap = loadRuntimeConfig({
+		envPath,
+		configDir,
 		accountProfile: argMap.accountProfile as string | undefined,
 		strategyProfile: argMap.strategyProfile as string | undefined,
 		riskProfile: argMap.riskProfile as string | undefined,
 		exchangeProfile: argMap.exchangeProfile as string | undefined,
-	};
-
-	const agenaiConfig = loadAgenaiConfig({
-		envPath,
-		configDir,
-		strategyProfile: profiles.strategyProfile,
-		riskProfile: profiles.riskProfile,
-		exchangeProfile: profiles.exchangeProfile,
+		requestedStrategyId: argMap.strategyId as string | undefined,
 	});
-	const requestedStrategyId =
-		(argMap.strategyId as string as StrategyId) ?? agenaiConfig.strategy.id;
-	const strategyProfile = resolveStrategyProfileName(
-		requestedStrategyId,
-		profiles.strategyProfile
+
+	runtimeBootstrap.selection.invalidSources.forEach(({ source, value }) =>
+		console.warn(`Ignoring invalid ${source} strategy value: ${value}`)
 	);
 
-	if (agenaiConfig.strategy.id !== requestedStrategyId) {
-		agenaiConfig.strategy = loadStrategyConfig(undefined, strategyProfile);
-	}
-	const strategyConfig = agenaiConfig.strategy as StrategyConfig;
-	const runtimeParams = assertStrategyRuntimeParams(strategyConfig);
-	const symbol = (argMap.symbol as string) ?? runtimeParams.symbol;
-	const timeframe =
-		(argMap.timeframe as string) ?? runtimeParams.executionTimeframe;
+	const runtimeParams = runtimeBootstrap.runtimeParams;
+	const requestedStrategyId = runtimeBootstrap.strategyId as StrategyId;
+	const symbolInput =
+		(argMap.symbol as string | undefined) ?? runtimeParams.symbol;
+	const timeframeInput =
+		(argMap.timeframe as string | undefined) ??
+		runtimeParams.executionTimeframe;
 	const maxCandles = parseNumber(argMap.maxCandles as string, "maxCandles");
 	const initialBalance = parseNumber(
 		argMap.initialBalance as string,
 		"initialBalance"
 	);
+
+	const runtimeSnapshot = createRuntimeSnapshot({
+		runtimeConfig: runtimeBootstrap,
+		instrument: {
+			symbol: symbolInput,
+			timeframe: timeframeInput,
+		},
+		maxCandlesOverride: maxCandles,
+	});
+
+	const strategyConfig = runtimeSnapshot.config.strategyConfig;
+	const snapshotParams = runtimeSnapshot.metadata.runtimeParams;
+	const symbol = snapshotParams.symbol;
+	const timeframe = snapshotParams.executionTimeframe;
 
 	const backtestConfig: BacktestConfig = {
 		symbol,
@@ -240,13 +239,7 @@ const main = async (): Promise<void> => {
 		`Running backtest for ${symbol} ${timeframe} (${requestedStrategyId})...`
 	);
 	const result = await runBacktest(backtestConfig, {
-		agenaiConfig,
-		accountProfile: profiles.accountProfile,
-		configDir,
-		envPath,
-		strategyProfile,
-		riskProfile: profiles.riskProfile,
-		exchangeProfile: profiles.exchangeProfile,
+		runtimeSnapshot,
 	});
 
 	const trades = result.trades.length;
@@ -295,8 +288,8 @@ const main = async (): Promise<void> => {
 		timeframe,
 		startTimestamp,
 		endTimestamp,
-		profiles,
-		strategyConfig: agenaiConfig.strategy,
+		profiles: runtimeSnapshot.config.profiles,
+		strategyConfig,
 	});
 
 	if (withMetrics) {

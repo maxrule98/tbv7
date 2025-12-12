@@ -1,5 +1,5 @@
 {
-	"name": "@agenai/trader-runtime",
+	"name": "@agenai/runtime",
 	"version": "0.1.0",
 	"private": true,
 	"main": "dist/index.js",
@@ -9,6 +9,10 @@
 		"test": "vitest run --passWithNoTests"
 	},
 	"dependencies": {
-		"@agenai/runtime": "workspace:*"
+		"@agenai/core": "workspace:*",
+		"@agenai/data": "workspace:*",
+		"@agenai/exchange-mexc": "workspace:*",
+		"@agenai/execution-engine": "workspace:*",
+		"@agenai/risk-engine": "workspace:*"
 	}
 }

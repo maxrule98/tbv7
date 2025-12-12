@@ -12,6 +12,6 @@
 	},
 	"dependencies": {
 		"@agenai/core": "workspace:*",
-		"@agenai/trader-runtime": "workspace:*"
+		"@agenai/runtime": "workspace:*"
 	}
 }
