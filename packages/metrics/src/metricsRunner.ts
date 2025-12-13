@@ -3,7 +3,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import type { BacktestResult } from "@agenai/trader-runtime";
+import type { BacktestResult } from "@agenai/runtime";
 import { calculatePerformance } from "./calcPerformance";
 import { formatMetricsCsv } from "./formatCSV";
 

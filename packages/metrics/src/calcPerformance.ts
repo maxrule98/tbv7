@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { BacktestResult, BacktestTrade } from "@agenai/trader-runtime";
+import type { BacktestResult, BacktestTrade } from "@agenai/runtime";
 import { buildDiagnosticsReport } from "./diagnostics";
 import {
 	DrawdownSpan,

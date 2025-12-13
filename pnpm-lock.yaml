@@ -56,9 +56,9 @@ importers:
       '@agenai/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@agenai/trader-runtime':
+      '@agenai/runtime':
         specifier: workspace:*
-        version: link:../../packages/trader-runtime
+        version: link:../../packages/runtime
 
   apps/trader-server:
     dependencies:
@@ -134,9 +134,9 @@ importers:
       '@agenai/core':
         specifier: workspace:*
         version: link:../core
-      '@agenai/trader-runtime':
+      '@agenai/runtime':
         specifier: workspace:*
-        version: link:../trader-runtime
+        version: link:../runtime
 
   packages/models-quant: {}
 
@@ -181,12 +181,6 @@ importers:
       rimraf:
         specifier: ^5.0.5
         version: 5.0.10
-
-  packages/trader-runtime:
-    dependencies:
-      '@agenai/runtime':
-        specifier: workspace:*
-        version: link:../runtime
 
 packages:
 

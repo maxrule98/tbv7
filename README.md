@@ -152,9 +152,9 @@ Declare `warmupPeriods` (per timeframe candle counts) and `historyWindowCandles`
 
 ### Shared strategy runtime
 
-- Both `startTrader` (live) and `runBacktest` hydrate strategies via the shared `createStrategyRuntime` factory in `@agenai/trader-runtime`.
-- The factory resolves the instrument symbol/timeframe, tracked timeframes, warmup windows, and cache limits exactly once, then feeds those artifacts into whichever runner invoked it.
-- This guarantees parity between live loops and backtests—any config metadata change is automatically honored everywhere without bespoke wiring.
+- Both `startTrader` (live) and `runBacktest` now live inside `@agenai/runtime`, and the first-class commands (`pnpm backtest ...`, `pnpm server:start`) do nothing more than call those APIs.
+- The runtime snapshot pipeline resolves the instrument symbol/timeframe, tracked timeframes, warmup windows, and cache limits exactly once, then feeds those artifacts into whichever runner invoked it.
+- Because the snapshot + metadata layer sits inside `@agenai/runtime`, any config change is honored everywhere without bespoke loaders, ensuring live/backtest parity by construction.
 
 ### Required strategy config fields
 
@@ -230,13 +230,19 @@ Set:
 - `EXECUTION_MODE` (`paper` or `live`)
 - Symbol + timeframe overrides
 
-### **3. Run trader (paper by default)**
+### **3. Run a parity backtest (uses @agenai/runtime)**
 
 ```bash
-pnpm --filter trader-cli dev
+pnpm backtest -- --start "2024-01-01T00:00:00Z" --end "2024-01-02T00:00:00Z"
 ```
 
-### **4. Dev mode**
+### **4. Start the trader server (paper/live via @agenai/runtime)**
+
+```bash
+pnpm server:start
+```
+
+### **5. Dev mode**
 
 ```bash
 pnpm dev
