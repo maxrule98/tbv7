@@ -3,6 +3,7 @@ import { createLogger } from "@agenai/core";
 import {
 	createRuntimeSnapshot,
 	loadRuntimeConfig,
+	parseStrategyArg,
 	startTrader,
 } from "@agenai/runtime";
 
@@ -14,9 +15,12 @@ const main = async (): Promise<void> => {
 		pid: process.pid,
 	});
 
+	// Parse and validate --strategy (required)
 	const argv = process.argv.slice(2);
+	const strategyId = parseStrategyArg(argv);
+
 	const runtimeBootstrap = loadRuntimeConfig({
-		requestedStrategyId: getStrategyArg(argv),
+		requestedStrategyId: strategyId,
 		envStrategyId: process.env.TRADER_STRATEGY,
 	});
 	const runtimeSnapshot = createRuntimeSnapshot({
@@ -58,19 +62,6 @@ const main = async (): Promise<void> => {
 	server.listen(port, () => {
 		logger.info("health_server_listening", { port });
 	});
-};
-
-const getStrategyArg = (argv: string[]): string | undefined => {
-	for (let i = 0; i < argv.length; i += 1) {
-		const arg = argv[i];
-		if (arg.startsWith("--strategy=")) {
-			return arg.split("=")[1];
-		}
-		if (arg === "--strategy" && i + 1 < argv.length) {
-			return argv[i + 1];
-		}
-	}
-	return undefined;
 };
 
 main().catch((error) => {

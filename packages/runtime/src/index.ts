@@ -6,3 +6,4 @@ export * from "./backtest/backtestTypes";
 export * from "./loadRuntimeConfig";
 export * from "./runtimeFactory";
 export * from "./runtimeSnapshot";
+export * from "./parseStrategyArg";

@@ -178,14 +178,17 @@ The CLI entry points now consume the registry metadata end-to-end:
 # List every registered strategy and its default profile
 pnpm strategy:list
 
-# Run a backtest with runtime metadata pulled from the registry
-pnpm --filter @agenai/backtest-cli start \
-  --strategyProfile ultra-aggressive-btc-usdt \
-  --start "2024-01-01T00:00:00Z" --end "2024-01-02T00:00:00Z"
+# Run a backtest (--strategy is REQUIRED)
+pnpm backtest -- \
+  --strategy=ultra_aggressive_btc_usdt \
+  --start "2024-01-01T00:00:00Z" --end "2024-01-02T00:00:00Z" \
+  --withMetrics
 
-# Launch the trader using the same runtime factory used by backtests
-pnpm --filter @agenai/trader-cli dev --strategyProfile ultra-aggressive-btc-usdt
+# Launch the trader server (--strategy is REQUIRED)
+pnpm server:start -- --strategy=ultra_aggressive_btc_usdt
 ```
+
+**Important:** The `--strategy=<id>` flag is now **required** for both backtest and server CLIs. Use the strategy's registered `id` (not the profile name). The flag accepts `--strategyId` as an alias. If you omit the flag, you'll get a helpful error listing all available strategy ids.
 
 Because the CLI commands defer to the shared runtime factory, warmup windows, cache sizes, and tracked timeframes stay in sync between historical simulations and live execution.
 
@@ -233,13 +236,20 @@ Set:
 ### **3. Run a parity backtest (uses @agenai/runtime)**
 
 ```bash
-pnpm backtest -- --start "2024-01-01T00:00:00Z" --end "2024-01-02T00:00:00Z"
+# List available strategies first
+pnpm strategy:list
+
+# Run backtest with required --strategy flag
+pnpm backtest -- \
+  --strategy=ultra_aggressive_btc_usdt \
+  --start "2024-01-01T00:00:00Z" \
+  --end "2024-01-02T00:00:00Z"
 ```
 
 ### **4. Start the trader server (paper/live via @agenai/runtime)**
 
 ```bash
-pnpm server:start
+pnpm server:start -- --strategy=ultra_aggressive_btc_usdt
 ```
 
 ### **5. Dev mode**
@@ -254,20 +264,20 @@ pnpm dev
 
 Quick reference for the unified workspace scripts:
 
-| Command                                                | Description                                                                                              |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `pnpm dev`                                             | Run every package's local development watcher (recursive `dev`).                                         |
-| `pnpm test`                                            | Validate strategy structure, then execute all package test suites.                                       |
-| `pnpm backtest -- --start <iso> --end <iso> [options]` | Run a new backtest, persisting JSON under `output/backtests/` (add `--withMetrics` to auto-run metrics). |
-| `pnpm metrics:process --file <backtest>`               | Analyze any saved backtest file and export summary KPIs plus CSV diagnostics.                            |
-| `pnpm strategy:list [--json]`                          | Print the registered strategies from the core registry.                                                  |
-| `pnpm validate:strategies`                             | Standalone structural validation for per-strategy folders.                                               |
-| `pnpm clean`                                           | Remove build artifacts across packages and the `output/` folder.                                         |
-| `pnpm format`                                          | Format the entire repo with Prettier.                                                                    |
-| `pnpm trader:build`                                    | Compile the `@agenai/trader-cli` worker for production usage.                                            |
-| `pnpm trader:start`                                    | Run the compiled trader worker (expects `trader:build` first).                                           |
-| `pnpm server:build`                                    | Build the `@agenai/trader-server` HTTP entrypoint.                                                       |
-| `pnpm server:start`                                    | Start the compiled trader server in production mode.                                                     |
+| Command                                                      | Description                                                                                              |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `pnpm dev`                                                   | Run every package's local development watcher (recursive `dev`).                                         |
+| `pnpm test`                                                  | Validate strategy structure, then execute all package test suites.                                       |
+| `pnpm backtest -- --strategy=<id> --start <iso> --end <iso>` | Run a new backtest, persisting JSON under `output/backtests/` (add `--withMetrics` to auto-run metrics). |
+| `pnpm metrics:process --file <backtest>`                     | Analyze any saved backtest file and export summary KPIs plus CSV diagnostics.                            |
+| `pnpm strategy:list [--json]`                                | Print the registered strategies from the core registry.                                                  |
+| `pnpm validate:strategies`                                   | Standalone structural validation for per-strategy folders.                                               |
+| `pnpm clean`                                                 | Remove build artifacts across packages and the `output/` folder.                                         |
+| `pnpm format`                                                | Format the entire repo with Prettier.                                                                    |
+| `pnpm trader:build`                                          | Compile the `@agenai/trader-cli` worker for production usage.                                            |
+| `pnpm trader:start`                                          | Run the compiled trader worker (expects `trader:build` first).                                           |
+| `pnpm server:build`                                          | Build the `@agenai/trader-server` HTTP entrypoint.                                                       |
+| `pnpm server:start -- --strategy=<id>`                       | Start the compiled trader server in production mode (--strategy required).                               |
 
 ---
 

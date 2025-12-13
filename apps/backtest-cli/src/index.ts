@@ -10,6 +10,7 @@ import {
 	BacktestConfig,
 	createRuntimeSnapshot,
 	loadRuntimeConfig,
+	parseStrategyArg,
 	runBacktest,
 	type RuntimeProfileMetadata,
 } from "@agenai/runtime";
@@ -29,23 +30,23 @@ interface PersistContext {
 }
 
 const USAGE = `Usage:
-  pnpm --filter @agenai/backtester-cli run dev -- --start <iso> --end <iso> [options]
+  pnpm backtest -- --strategy=<id> --start <iso> --end <iso> [options]
 
-Options (all optional unless noted):
+Options:
+  --strategy <id>          Strategy id (required; use --strategyId as alias)
   --start <iso>            ISO timestamp for first candle (required)
   --end <iso>              ISO timestamp for last candle (required)
   --symbol <symbol>        Trading pair (defaults to config default)
   --timeframe <tf>         Candle timeframe (defaults to config default)
-	--strategyId <id>        Strategy id (use the config JSON id; defaults to loaded config)
   --maxCandles <number>    Limit candles for execution timeframe
   --initialBalance <usd>   Override starting balance
   --envPath <path>         Custom .env path
   --configDir <path>       Custom config directory
   --accountProfile <id>    Account profile name
-  --strategyProfile <id>   Strategy profile name
+  --strategyProfile <id>   Strategy profile name (config profile, not strategy id)
   --riskProfile <id>       Risk profile name
   --exchangeProfile <id>   Exchange profile name
-	--withMetrics            Run metrics:process after saving the backtest file
+  --withMetrics            Run metrics:process after saving the backtest file
   --json                   Print full JSON result payload
   --help                   Show this message
 `;
@@ -176,6 +177,9 @@ const main = async (): Promise<void> => {
 		return;
 	}
 
+	// Parse and validate --strategy (required)
+	const strategyId = parseStrategyArg(process.argv.slice(2));
+
 	const startTimestamp = parseTimestamp(argMap.start as string, "start");
 	const endTimestamp = parseTimestamp(argMap.end as string, "end");
 	if (startTimestamp >= endTimestamp) {
@@ -191,7 +195,7 @@ const main = async (): Promise<void> => {
 		strategyProfile: argMap.strategyProfile as string | undefined,
 		riskProfile: argMap.riskProfile as string | undefined,
 		exchangeProfile: argMap.exchangeProfile as string | undefined,
-		requestedStrategyId: argMap.strategyId as string | undefined,
+		requestedStrategyId: strategyId,
 	});
 
 	runtimeBootstrap.selection.invalidSources.forEach(({ source, value }) =>
