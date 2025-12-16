@@ -20,54 +20,54 @@
 		"breakout",
 		"meanReversion"
 	],
-	"cacheTTLms": 2500,
+	"cacheTTLms": 1500,
 	"atrPeriod1m": 14,
 	"atrPeriod5m": 14,
 	"emaFastPeriod": 9,
 	"emaSlowPeriod": 21,
 	"rsiPeriod": 14,
 	"lookbacks": {
-		"executionBars": 100,
-		"breakoutRange": 20,
-		"rangeDetection": 30,
-		"trendCandles": 18,
-		"volatility": 24,
-		"cvd": 60
+		"executionBars": 80,
+		"breakoutRange": 16,
+		"rangeDetection": 24,
+		"trendCandles": 14,
+		"volatility": 18,
+		"cvd": 40
 	},
 	"thresholds": {
-		"vwapStretchPct": 0.003,
-		"breakoutVolumeMultiple": 1.05,
-		"breakoutAtrMultiple": 0.3,
-		"meanRevStretchAtr": 0.8,
-		"liquiditySweepWickMultiple": 1.05,
-		"trapVolumeMaxMultiple": 1.3,
-		"cvdDivergenceThreshold": 1.5,
-		"rsiOverbought": 70,
-		"rsiOversold": 30
+		"vwapStretchPct": 0.002,
+		"breakoutVolumeMultiple": 1.03,
+		"breakoutAtrMultiple": 0.25,
+		"meanRevStretchAtr": 0.55,
+		"liquiditySweepWickMultiple": 0.85,
+		"trapVolumeMaxMultiple": 1.6,
+		"cvdDivergenceThreshold": 1.2,
+		"rsiOverbought": 68,
+		"rsiOversold": 32
 	},
 	"risk": {
-		"riskPerTradePct": 0.025,
-		"atrStopMultiple": 0.8,
-		"partialTpRR": 0.6,
-		"finalTpRR": 1.2,
-		"trailingAtrMultiple": 0.5
+		"riskPerTradePct": 0.035,
+		"atrStopMultiple": 1.1,
+		"partialTpRR": 0.55,
+		"finalTpRR": 1.8,
+		"trailingAtrMultiple": 0.8
 	},
 	"qualityFilters": {
-		"minConfidence": 0.35,
+		"minConfidence": 0.25,
 		"playTypeMinConfidence": {
-			"liquiditySweep": 0.4,
-			"breakoutTrap": 0.38,
-			"breakout": 0.42,
-			"meanReversion": 0.45
+			"liquiditySweep": 0.28,
+			"breakoutTrap": 0.3,
+			"breakout": 0.32,
+			"meanReversion": 0.33
 		},
 		"requireCvdAlignment": false,
 		"requireStrongLongCvd": false,
 		"allowShortsAgainstCvd": true,
-		"minLongTrendSlopePct": 0.0001,
-		"minShortTrendSlopePct": 0.0001,
-		"requireLongDiscountToVwapPct": 0.0001,
-		"requireShortPremiumToVwapPct": 0.0001,
-		"maxTrendSlopePctForCounterTrend": 0.008,
+		"minLongTrendSlopePct": 0,
+		"minShortTrendSlopePct": 0,
+		"requireLongDiscountToVwapPct": 0,
+		"requireShortPremiumToVwapPct": 0,
+		"maxTrendSlopePctForCounterTrend": 0.015,
 		"maxVolatilityForMeanReversion": "high"
 	},
 	"sessionFilters": {
@@ -80,11 +80,11 @@
 		"lookbackTrades": 8,
 		"maxDrawdownPct": 0.008
 	},
-	"maxTradeDurationMinutes": 30,
+	"maxTradeDurationMinutes": 45,
 	"enableVolatilityFadeExit": false,
 	"allowBreakoutsWhenRSIOverbought": true,
-	"reversionNeedsTwoOfThreeConditions": false,
-	"maxDrawdownPerTradePct": 0.025,
-	"cooldownAfterStopoutBars": 3,
-	"dailyDrawdownLimitPct": 0.08
+	"reversionNeedsTwoOfThreeConditions": true,
+	"maxDrawdownPerTradePct": 0.035,
+	"cooldownAfterStopoutBars": 2,
+	"dailyDrawdownLimitPct": 0.12
 }
