@@ -60,7 +60,18 @@ export const fetchHistoricalCandles = async (
 		);
 
 		if (!batch.length) {
-			break;
+			options.logger?.warn?.("historical_fetch_empty_batch", {
+				timeframe: options.request.timeframe,
+				since,
+				endTimestamp: options.endTimestamp,
+				batchSize,
+			});
+			since = Math.min(
+				options.endTimestamp + timeframeMs,
+				since + timeframeMs * batchSize
+			);
+			iterations += 1;
+			continue;
 		}
 
 		for (const candle of batch) {

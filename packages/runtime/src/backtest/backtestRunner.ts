@@ -397,11 +397,15 @@ export const runBacktest = async (
 		}
 	}
 
+	const completedTrades = trades.filter(
+		(trade) => trade.action === "CLOSE"
+	).length;
 	runtimeLogger.info("backtest_summary", {
 		symbol,
 		timeframe,
 		totalCandles: executionSeries.candles.length,
-		totalTrades: trades.length,
+		totalTrades: completedTrades,
+		totalExecutions: trades.length,
 		finalEquity:
 			equitySnapshots[equitySnapshots.length - 1]?.equity ?? fallbackEquity,
 	});

@@ -201,7 +201,10 @@ const main = async (): Promise<void> => {
 		runtimeSnapshot,
 	});
 
-	const trades = result.trades.length;
+	const executions = result.trades.length;
+	const trades = result.trades.filter(
+		(trade) => trade.action === "CLOSE"
+	).length;
 	const firstSnapshot = result.equitySnapshots[0];
 	const lastSnapshot =
 		result.equitySnapshots[result.equitySnapshots.length - 1];
@@ -223,6 +226,7 @@ const main = async (): Promise<void> => {
 				start: new Date(startTimestamp).toISOString(),
 				end: new Date(endTimestamp).toISOString(),
 				trades,
+				executions,
 				finalEquity,
 				totalPnl,
 			},

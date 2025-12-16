@@ -9,6 +9,9 @@ import {
 	UltraAggressiveBtcUsdtConfig,
 	UltraAggressiveRiskConfig,
 	UltraAggressivePlayType,
+	UltraAggressiveSessionFilters,
+	UltraAggressiveSessionLabel,
+	UltraAggressiveQualityFilters,
 } from "./config";
 
 export type TrendDirection = "TrendingUp" | "TrendingDown" | "Ranging";
@@ -66,6 +69,7 @@ export interface RiskControlState {
 	lastRealizedPnLPct: number | null;
 	cooldownBarsRemaining: number;
 	sessionPnLPct: number;
+	rollingDrawdownPct: number;
 }
 
 export interface StrategyContextSnapshot {
@@ -80,6 +84,8 @@ export interface StrategyContextSnapshot {
 	setups: StrategySetups;
 	setupDiagnostics: SetupDiagnosticsEntry[];
 	recentExecutionCandles: Candle[];
+	sessionLabel: UltraAggressiveSessionLabel;
+	utcHour: number;
 	riskState: RiskControlState | null;
 }
 
@@ -141,6 +147,8 @@ export const buildStrategyContext = (
 		50
 	);
 	const recentExecutionCandles = executionCandles.slice(-recentWindow);
+	const utcHour = getUtcHour(latest.timestamp);
+	const sessionLabel = classifySessionLabel(latest.timestamp);
 	return {
 		symbol: latest.symbol,
 		timeframe: latest.timeframe,
@@ -153,6 +161,8 @@ export const buildStrategyContext = (
 		setups,
 		setupDiagnostics: diagnostics,
 		recentExecutionCandles,
+		sessionLabel,
+		utcHour,
 		riskState: riskState ?? null,
 	};
 };
@@ -178,8 +188,15 @@ export const selectEntryDecision = (
 		if (!active) {
 			return;
 		}
+		if (!isIntentAllowedForSession(ctx, intent, config)) {
+			return;
+		}
+		const decision = buildSetupDecision(ctx, intent, reason, config.risk);
+		if (!passesQualityFilters(ctx, decision, config)) {
+			return;
+		}
 		candidates.push({
-			decision: buildSetupDecision(ctx, intent, reason, config.risk),
+			decision,
 			priorityIndex,
 		});
 	};
@@ -259,6 +276,209 @@ export const selectEntryDecision = (
 
 	return candidates[0]?.decision ?? null;
 };
+
+const isIntentAllowedForSession = (
+	ctx: StrategyContextSnapshot,
+	intent: SetupDecision["intent"],
+	config: UltraAggressiveBtcUsdtConfig
+): boolean => {
+	const filters = config.sessionFilters;
+	if (!filters?.enabled) {
+		return true;
+	}
+	const side =
+		intent === "OPEN_LONG" ? "long" : intent === "OPEN_SHORT" ? "short" : null;
+	if (!side) {
+		return true;
+	}
+	return passesSessionFilters(ctx, ctx.sessionLabel, side, filters);
+};
+
+const passesSessionFilters = (
+	ctx: StrategyContextSnapshot,
+	session: UltraAggressiveSessionLabel,
+	side: "long" | "short",
+	filters: UltraAggressiveSessionFilters
+): boolean => {
+	if (
+		filters.allowedSessions?.length &&
+		!filters.allowedSessions.includes(session)
+	) {
+		return false;
+	}
+	if (filters.blockedSessions?.includes(session)) {
+		return false;
+	}
+	const trendOverride =
+		side === "long" &&
+		filters.allowLongsWhenTrendingUp?.includes(session) &&
+		ctx.trendDirection === "TrendingUp";
+	if (side === "long") {
+		if (
+			filters.allowedLongSessions?.length &&
+			!filters.allowedLongSessions.includes(session) &&
+			!trendOverride
+		) {
+			return false;
+		}
+		if (
+			filters.blockedLongSessions?.includes(session) &&
+			!trendOverride
+		) {
+			return false;
+		}
+		return true;
+	}
+	if (
+		filters.allowedShortSessions?.length &&
+		!filters.allowedShortSessions.includes(session)
+	) {
+		return false;
+	}
+	if (filters.blockedShortSessions?.includes(session)) {
+		return false;
+	}
+	return true;
+};
+
+const passesQualityFilters = (
+	ctx: StrategyContextSnapshot,
+	decision: SetupDecision,
+	config: UltraAggressiveBtcUsdtConfig
+): boolean => {
+	const filters: UltraAggressiveQualityFilters | undefined =
+		config.qualityFilters;
+	if (!filters) {
+		return true;
+	}
+	const playType = getPlayTypeFromReason(decision.reason);
+	const isLong = decision.intent === "OPEN_LONG";
+	const isShort = decision.intent === "OPEN_SHORT";
+	const requiredConfidence = Math.max(
+		filters.minConfidence ?? 0,
+		playType && filters.playTypeMinConfidence?.[playType]
+			? (filters.playTypeMinConfidence[playType] ?? 0)
+			: 0
+	);
+	if (
+		requiredConfidence > 0 &&
+		decision.confidence < Number(requiredConfidence.toFixed(2))
+	) {
+		return false;
+	}
+	const cvdAligned = isCvdAlignedWithIntent(
+		ctx.indicator.cvdTrend,
+		decision.intent
+	);
+	if (filters.requireCvdAlignment && !cvdAligned) {
+		if (!(isShort && filters.allowShortsAgainstCvd)) {
+			return false;
+		}
+	}
+	const trendSlopePct = getTrendSlopePct(ctx.recentExecutionCandles);
+	const slopeMagnitude = Math.abs(trendSlopePct);
+	const vwapDeviation = ctx.indicator.vwapDeviationPct;
+	if (
+		isLong &&
+		filters.requireStrongLongCvd &&
+		ctx.indicator.cvdTrend !== "up"
+	) {
+		return false;
+	}
+	if (
+		isLong &&
+		typeof filters.minLongTrendSlopePct === "number" &&
+		trendSlopePct < filters.minLongTrendSlopePct
+	) {
+		return false;
+	}
+	if (
+		isShort &&
+		typeof filters.minShortTrendSlopePct === "number" &&
+		trendSlopePct > -Math.abs(filters.minShortTrendSlopePct)
+	) {
+		return false;
+	}
+	if (
+		isLong &&
+		typeof filters.requireLongDiscountToVwapPct === "number"
+	) {
+		const longThreshold = Math.abs(filters.requireLongDiscountToVwapPct);
+		if (vwapDeviation === null || vwapDeviation > -longThreshold) {
+			return false;
+		}
+	}
+	if (
+		isShort &&
+		typeof filters.requireShortPremiumToVwapPct === "number"
+	) {
+		const shortThreshold = Math.abs(filters.requireShortPremiumToVwapPct);
+		if (vwapDeviation === null || vwapDeviation < shortThreshold) {
+			return false;
+		}
+	}
+	if (
+		playType === "meanReversion" &&
+		filters.maxVolatilityForMeanReversion &&
+		compareVolRegime(ctx.volRegime, filters.maxVolatilityForMeanReversion) > 0
+	) {
+		return false;
+	}
+	if (
+		(playType === "meanReversion" ||
+			playType === "liquiditySweep" ||
+			playType === "breakoutTrap") &&
+		filters.maxTrendSlopePctForCounterTrend
+	) {
+		if (slopeMagnitude >= filters.maxTrendSlopePctForCounterTrend) {
+			return false;
+		}
+	}
+	return true;
+};
+
+const VOLATILITY_RANK: Record<VolatilityRegime, number> = {
+	low: 0,
+	balanced: 1,
+	high: 2,
+};
+
+const compareVolRegime = (
+	current: VolatilityRegime,
+	maxAllowed: "low" | "balanced" | "high"
+): number => VOLATILITY_RANK[current] - VOLATILITY_RANK[maxAllowed];
+
+const isCvdAlignedWithIntent = (
+	trend: IndicatorSnapshot["cvdTrend"],
+	intent: SetupDecision["intent"]
+): boolean => {
+	if (!trend || trend === "flat" || intent === "NO_ACTION") {
+		return true;
+	}
+	if (intent === "OPEN_LONG") {
+		return trend !== "down";
+	}
+	if (intent === "OPEN_SHORT") {
+		return trend !== "up";
+	}
+	return true;
+};
+
+function getPlayTypeFromReason(reason: string): UltraAggressivePlayType | null {
+	if (reason.includes("liquidity_sweep")) {
+		return "liquiditySweep";
+	}
+	if (reason.includes("breakout_trap")) {
+		return "breakoutTrap";
+	}
+	if (reason.includes("trend_ignition")) {
+		return "breakout";
+	}
+	if (reason.includes("mean_reversion")) {
+		return "meanReversion";
+	}
+	return null;
+}
 
 const computeIndicators = (
 	executionCandles: Candle[],
@@ -480,12 +700,36 @@ export const evaluateRiskBlocks = (
 		return "cooldownBlock";
 	}
 	if (
+		config.equityThrottle?.enabled &&
+		config.equityThrottle.maxDrawdownPct > 0 &&
+		state.rollingDrawdownPct <=
+			-config.equityThrottle.maxDrawdownPct
+	) {
+		return "equityThrottle";
+	}
+	if (
 		config.dailyDrawdownLimitPct > 0 &&
 		state.sessionPnLPct <= -config.dailyDrawdownLimitPct
 	) {
 		return "drawdownLimit";
 	}
 	return null;
+};
+
+const getUtcHour = (timestamp: number): number =>
+	new Date(timestamp).getUTCHours();
+
+const classifySessionLabel = (
+	timestamp: number
+): UltraAggressiveSessionLabel => {
+	const hour = getUtcHour(timestamp);
+	if (hour < 8) {
+		return "asia";
+	}
+	if (hour < 16) {
+		return "eu";
+	}
+	return "us";
 };
 
 const classifyTrendDirection = (
@@ -899,6 +1143,18 @@ const detectLiquiditySweep = (
 	};
 };
 
+const getTrendSlopePct = (candles: Candle[]): number => {
+	if (candles.length < 2) {
+		return 0;
+	}
+	const first = candles[0].close;
+	const last = candles[candles.length - 1].close;
+	if (!first) {
+		return 0;
+	}
+	return (last - first) / first;
+};
+
 const computeConfidenceScore = (
 	ctx: StrategyContextSnapshot,
 	intent: SetupDecision["intent"],
@@ -906,18 +1162,67 @@ const computeConfidenceScore = (
 ): number => {
 	let score = 0.5;
 	const isLong = intent === "OPEN_LONG";
+	const playType = getPlayTypeFromReason(reason);
+	const slope = Math.abs(getTrendSlopePct(ctx.recentExecutionCandles));
+	const atrPct = ctx.indicator.atr1m
+		? ctx.indicator.atr1m / Math.max(ctx.price, 1)
+		: 0;
+	const rsi = ctx.indicator.rsi;
+	const lastRealized = ctx.riskState?.lastRealizedPnLPct ?? 0;
+
 	if (reason.includes("trend_ignition")) {
 		score += ctx.volRegime === "high" ? 0.2 : 0.1;
 		score +=
 			ctx.trendDirection === (isLong ? "TrendingUp" : "TrendingDown") ? 0.2 : 0;
+		score += Math.min(0.2, slope * 20);
 	}
 	if (reason.includes("liquidity_sweep")) {
 		score += ctx.indicator.cvdDivergence ? 0.2 : 0;
 		score += ctx.volRegime !== "high" ? 0.1 : 0;
+		score -= Math.min(0.2, slope * 25);
+		if (atrPct > 0.004) {
+			score -= 0.1;
+		}
 	}
 	if (reason.includes("mean_reversion") || reason.includes("breakout_trap")) {
-		score += ctx.volRegime !== "high" ? 0.15 : 0;
+		score += ctx.volRegime !== "high" ? 0.15 : -0.05;
 		score += ctx.indicator.cvdDivergence ? 0.1 : 0;
+		score -= Math.min(0.2, slope * 25);
+		if (atrPct > 0.004) {
+			score -= 0.05;
+		}
+	}
+	if (
+		playType &&
+		(playType === "meanReversion" || playType === "liquiditySweep") &&
+		ctx.trendDirection === (isLong ? "TrendingDown" : "TrendingUp")
+	) {
+		score -= 0.05;
+	}
+	const cvdTrend = ctx.indicator.cvdTrend;
+	if (cvdTrend && cvdTrend !== "flat") {
+		if (isLong && cvdTrend === "up") {
+			score += 0.05;
+		} else if (!isLong && cvdTrend === "down") {
+			score += 0.05;
+		} else {
+			score -= 0.05;
+		}
+	}
+	if (rsi !== null) {
+		if (isLong && rsi < 35) {
+			score += 0.05;
+		} else if (!isLong && rsi > 65) {
+			score += 0.05;
+		}
+	}
+	if (ctx.riskState?.lastExitReason === "perTradeDrawdown") {
+		score -= 0.1;
+	}
+	if (lastRealized > 0) {
+		score += 0.02;
+	} else if (lastRealized < 0) {
+		score -= 0.05;
 	}
 	return Number(Math.min(1, Math.max(0, score)).toFixed(2));
 };

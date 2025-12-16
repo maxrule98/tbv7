@@ -9,6 +9,39 @@ export type UltraAggressivePlayType =
 	| "breakout"
 	| "meanReversion";
 
+export type UltraAggressiveSessionLabel = "asia" | "eu" | "us";
+
+export interface UltraAggressiveSessionFilters {
+	enabled: boolean;
+	allowedSessions?: UltraAggressiveSessionLabel[];
+	blockedSessions?: UltraAggressiveSessionLabel[];
+	allowedLongSessions?: UltraAggressiveSessionLabel[];
+	allowedShortSessions?: UltraAggressiveSessionLabel[];
+	blockedLongSessions?: UltraAggressiveSessionLabel[];
+	blockedShortSessions?: UltraAggressiveSessionLabel[];
+	allowLongsWhenTrendingUp?: UltraAggressiveSessionLabel[];
+}
+
+export interface UltraAggressiveQualityFilters {
+	minConfidence: number;
+	playTypeMinConfidence?: Partial<Record<UltraAggressivePlayType, number>>;
+	requireCvdAlignment?: boolean;
+	maxTrendSlopePctForCounterTrend?: number;
+	maxVolatilityForMeanReversion?: "low" | "balanced" | "high";
+	requireStrongLongCvd?: boolean;
+	allowShortsAgainstCvd?: boolean;
+	minLongTrendSlopePct?: number;
+	minShortTrendSlopePct?: number;
+	requireLongDiscountToVwapPct?: number;
+	requireShortPremiumToVwapPct?: number;
+}
+
+export interface UltraAggressiveEquityThrottleConfig {
+	enabled: boolean;
+	lookbackTrades: number;
+	maxDrawdownPct: number;
+}
+
 export interface UltraAggressiveRiskConfig {
 	riskPerTradePct: number;
 	atrStopMultiple: number;
@@ -64,6 +97,9 @@ export interface UltraAggressiveBtcUsdtConfig {
 	maxDrawdownPerTradePct: number;
 	cooldownAfterStopoutBars: number;
 	dailyDrawdownLimitPct: number;
+	sessionFilters?: UltraAggressiveSessionFilters;
+	qualityFilters?: UltraAggressiveQualityFilters;
+	equityThrottle?: UltraAggressiveEquityThrottleConfig;
 	historyWindowCandles?: number;
 	warmupPeriods: Record<string, number>;
 }
@@ -102,10 +138,10 @@ export const ultraAggressiveManifest: UltraAggressiveStrategyManifest = {
 	riskRules: {
 		maxTradeDurationMinutes: 90,
 		stopLossAtrMultiple: 1.2,
-		partialTakeProfitRR: 0.5,
-		finalTakeProfitRR: 1.2,
-		trailingAtrMultiple: 1.1,
-		maxDrawdownPerTradePct: 0.0125,
+		partialTakeProfitRR: 0.8,
+		finalTakeProfitRR: 2,
+		trailingAtrMultiple: 1,
+		maxDrawdownPerTradePct: 0.01,
 		dailyDrawdownLimitPct: 0.03,
 	},
 };

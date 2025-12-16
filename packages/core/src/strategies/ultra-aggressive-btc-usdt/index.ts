@@ -33,6 +33,8 @@ export class UltraAggressiveBtcUsdtStrategy {
 	private sessionDate: string | null = null;
 	private sessionPnLPct = 0;
 	private lastContextTimestamp: number | null = null;
+	private recentPnLPcts: number[] = [];
+	private rollingDrawdownPct = 0;
 
 	constructor(
 		private readonly config: UltraAggressiveBtcUsdtConfig,
@@ -232,6 +234,7 @@ export class UltraAggressiveBtcUsdtStrategy {
 			lastRealizedPnLPct: this.lastRealizedPnLPct,
 			cooldownBarsRemaining: this.cooldownBarsRemaining,
 			sessionPnLPct: this.sessionPnLPct,
+			rollingDrawdownPct: this.rollingDrawdownPct,
 		};
 	}
 
@@ -267,6 +270,7 @@ export class UltraAggressiveBtcUsdtStrategy {
 		this.lastExitReason = reason;
 		this.lastRealizedPnLPct = pnlPct;
 		this.sessionPnLPct += pnlPct;
+		this.updateRollingDrawdown(pnlPct);
 		if (
 			reason === "perTradeDrawdown" &&
 			this.config.cooldownAfterStopoutBars > 0
@@ -274,6 +278,23 @@ export class UltraAggressiveBtcUsdtStrategy {
 			this.cooldownBarsRemaining = this.config.cooldownAfterStopoutBars;
 		}
 		this.positionMemory = null;
+	}
+
+	private updateRollingDrawdown(pnlPct: number): void {
+		const throttle = this.config.equityThrottle;
+		if (!throttle?.enabled || throttle.lookbackTrades <= 0) {
+			this.recentPnLPcts = [];
+			this.rollingDrawdownPct = 0;
+			return;
+		}
+		this.recentPnLPcts.push(pnlPct);
+		while (this.recentPnLPcts.length > throttle.lookbackTrades) {
+			this.recentPnLPcts.shift();
+		}
+		this.rollingDrawdownPct = this.recentPnLPcts.reduce(
+			(acc, value) => acc + value,
+			0
+		);
 	}
 
 	private computePnLPct(price: number, memory: PositionMemoryState): number {
@@ -297,6 +318,10 @@ export type {
 	UltraAggressiveRiskRulesSummary,
 	UltraAggressiveStrategyManifest,
 	UltraAggressiveThresholds,
+	UltraAggressiveSessionFilters,
+	UltraAggressiveSessionLabel,
+	UltraAggressiveQualityFilters,
+	UltraAggressiveEquityThrottleConfig,
 } from "./config";
 
 export const createUltraAggressiveCache = (

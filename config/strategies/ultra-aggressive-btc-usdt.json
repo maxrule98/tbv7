@@ -27,36 +27,64 @@
 	"emaSlowPeriod": 21,
 	"rsiPeriod": 14,
 	"lookbacks": {
-		"executionBars": 200,
-		"breakoutRange": 40,
-		"rangeDetection": 60,
-		"trendCandles": 36,
-		"volatility": 48,
-		"cvd": 120
+		"executionBars": 100,
+		"breakoutRange": 20,
+		"rangeDetection": 30,
+		"trendCandles": 18,
+		"volatility": 24,
+		"cvd": 60
 	},
 	"thresholds": {
-		"vwapStretchPct": 0.0075,
-		"breakoutVolumeMultiple": 1.2,
-		"breakoutAtrMultiple": 0.5,
-		"meanRevStretchAtr": 1,
-		"liquiditySweepWickMultiple": 1.2,
-		"trapVolumeMaxMultiple": 1.1,
-		"cvdDivergenceThreshold": 3,
-		"rsiOverbought": 85,
-		"rsiOversold": 15
+		"vwapStretchPct": 0.003,
+		"breakoutVolumeMultiple": 1.05,
+		"breakoutAtrMultiple": 0.3,
+		"meanRevStretchAtr": 0.8,
+		"liquiditySweepWickMultiple": 1.05,
+		"trapVolumeMaxMultiple": 1.3,
+		"cvdDivergenceThreshold": 1.5,
+		"rsiOverbought": 70,
+		"rsiOversold": 30
 	},
 	"risk": {
-		"riskPerTradePct": 0.015,
-		"atrStopMultiple": 1.2,
-		"partialTpRR": 0.5,
+		"riskPerTradePct": 0.025,
+		"atrStopMultiple": 0.8,
+		"partialTpRR": 0.6,
 		"finalTpRR": 1.2,
-		"trailingAtrMultiple": 1.1
+		"trailingAtrMultiple": 0.5
 	},
-	"maxTradeDurationMinutes": 90,
-	"enableVolatilityFadeExit": true,
+	"qualityFilters": {
+		"minConfidence": 0.35,
+		"playTypeMinConfidence": {
+			"liquiditySweep": 0.4,
+			"breakoutTrap": 0.38,
+			"breakout": 0.42,
+			"meanReversion": 0.45
+		},
+		"requireCvdAlignment": false,
+		"requireStrongLongCvd": false,
+		"allowShortsAgainstCvd": true,
+		"minLongTrendSlopePct": 0.0001,
+		"minShortTrendSlopePct": 0.0001,
+		"requireLongDiscountToVwapPct": 0.0001,
+		"requireShortPremiumToVwapPct": 0.0001,
+		"maxTrendSlopePctForCounterTrend": 0.008,
+		"maxVolatilityForMeanReversion": "high"
+	},
+	"sessionFilters": {
+		"enabled": false,
+		"blockedLongSessions": [],
+		"allowLongsWhenTrendingUp": ["asia", "eu", "us"]
+	},
+	"equityThrottle": {
+		"enabled": false,
+		"lookbackTrades": 8,
+		"maxDrawdownPct": 0.008
+	},
+	"maxTradeDurationMinutes": 30,
+	"enableVolatilityFadeExit": false,
 	"allowBreakoutsWhenRSIOverbought": true,
-	"reversionNeedsTwoOfThreeConditions": true,
-	"maxDrawdownPerTradePct": 0.0125,
-	"cooldownAfterStopoutBars": 10,
-	"dailyDrawdownLimitPct": 0.03
+	"reversionNeedsTwoOfThreeConditions": false,
+	"maxDrawdownPerTradePct": 0.025,
+	"cooldownAfterStopoutBars": 3,
+	"dailyDrawdownLimitPct": 0.08
 }
