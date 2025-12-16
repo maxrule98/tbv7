@@ -12,6 +12,9 @@ importers:
         specifier: ^7.5.4
         version: 7.5.4
     devDependencies:
+      '@agenai/runtime':
+        specifier: workspace:*
+        version: link:packages/runtime
       '@types/node':
         specifier: ^20.11.30
         version: 20.19.25

@@ -16,7 +16,7 @@ describe("runtime parity fingerprints", () => {
 					...paperSnapshot.config.agenaiConfig.env,
 					executionMode:
 						paperSnapshot.config.agenaiConfig.env.executionMode === "paper"
-							? "backtest"
+							? "live"
 							: "paper",
 				},
 			},
