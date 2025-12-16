@@ -41,7 +41,7 @@ const buildSummaryRow = (
 		timeframe: summary.metadata.timeframe,
 		start: new Date(summary.metadata.startTimestamp).toISOString(),
 		end: new Date(summary.metadata.endTimestamp).toISOString(),
-		configFingerprint: summary.metadata.configFingerprint,
+		strategyConfigFingerprint: summary.metadata.strategyConfigFingerprint,
 		tradeCount: summary.metadata.tradeCount,
 		netProfit: summary.netProfit,
 		grossProfit: summary.grossProfit,
@@ -67,7 +67,8 @@ const buildTradeRows = (
 ): Record<string, unknown>[] => {
 	return trades.map((trade) => ({
 		strategyId: report.summary.metadata.strategyId,
-		configFingerprint: report.summary.metadata.configFingerprint,
+		strategyConfigFingerprint:
+			report.summary.metadata.strategyConfigFingerprint,
 		symbol: trade.symbol,
 		side: trade.side,
 		playType: trade.playType,
@@ -116,7 +117,8 @@ const buildGroupedRows = (
 			: 0;
 		return {
 			strategyId: report.summary.metadata.strategyId,
-			configFingerprint: report.summary.metadata.configFingerprint,
+			strategyConfigFingerprint:
+				report.summary.metadata.strategyConfigFingerprint,
 			group: key,
 			groupMode: groupBy,
 			tradeCount: value.trades.length,

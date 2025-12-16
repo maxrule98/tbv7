@@ -271,6 +271,7 @@ Quick reference for the unified workspace scripts:
 | `pnpm backtest -- --strategy=<id> --start <iso> --end <iso>` | Run a new backtest, persisting JSON under `output/backtests/` (add `--withMetrics` to auto-run metrics). |
 | `pnpm metrics:process --file <backtest>`                     | Analyze any saved backtest file and export summary KPIs plus CSV diagnostics.                            |
 | `pnpm strategy:list [--json]`                                | Print the registered strategies from the core registry.                                                  |
+| `pnpm runtime:print-config -- --strategy=<id>`               | Show canonicalized configs, paths, and fingerprints for the requested strategy.                          |
 | `pnpm validate:strategies`                                   | Standalone structural validation for per-strategy folders.                                               |
 | `pnpm clean`                                                 | Remove build artifacts across packages and the `output/` folder.                                         |
 | `pnpm format`                                                | Format the entire repo with Prettier.                                                                    |

@@ -27,6 +27,6 @@ This table captures every file that currently participates in strategy loading/r
 
 - There is no single place that produces per-bar diagnostics for backtests; this will live inside the new runtime loop so we can reuse the live decision logging.
 - Profile overrides are computed three times (CLI, backtest runner, startTrader). The new `packages/runtime/src/loadConfig.ts` should centralize that logic.
-- Backtest JSON currently lacks the `configFingerprint` and `timeframeFingerprint` entries emitted in live logs. The shared runtime metadata module will add them once extracted.
+- Backtest JSON currently lacks the `strategyConfigFingerprint` and `timeframeFingerprint` entries emitted in live logs. The shared runtime metadata module will add them once extracted.
 
 With this mapping in place we can proceed to Step B: create the `packages/runtime` package, define the runtime interfaces (`RuntimeContext`, `RuntimeArtifacts`, `SharedBuilderOptions`), and begin porting code into it.

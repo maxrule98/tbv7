@@ -25,7 +25,7 @@ import { UltraAggressiveMetrics } from "./metrics";
 
 export class UltraAggressiveBtcUsdtStrategy {
 	private positionMemory: PositionMemoryState | null = null;
-	private readonly configFingerprint: string;
+	private readonly strategyConfigFingerprint: string;
 	private readonly metrics = new UltraAggressiveMetrics();
 	private cooldownBarsRemaining = 0;
 	private lastExitReason: string | null = null;
@@ -38,7 +38,7 @@ export class UltraAggressiveBtcUsdtStrategy {
 		private readonly config: UltraAggressiveBtcUsdtConfig,
 		private readonly deps: UltraAggressiveDeps
 	) {
-		this.configFingerprint = hashJson(config);
+		this.strategyConfigFingerprint = hashJson(config);
 	}
 
 	async decide(position: PositionSide = "FLAT"): Promise<TradeIntent> {
@@ -135,7 +135,7 @@ export class UltraAggressiveBtcUsdtStrategy {
 				tp1: decision.tp1,
 				tp2: decision.tp2,
 				confidence: decision.confidence,
-				configFingerprint: this.configFingerprint,
+				strategyConfigFingerprint: this.strategyConfigFingerprint,
 				decisionContext: this.buildDecisionContext(ctx),
 			},
 		};
@@ -165,12 +165,12 @@ export class UltraAggressiveBtcUsdtStrategy {
 		const latest = candles[candles.length - 1];
 		const metadata = ctx
 			? {
-				configFingerprint: this.configFingerprint,
-				decisionContext: this.buildDecisionContext(ctx),
-			}
+					strategyConfigFingerprint: this.strategyConfigFingerprint,
+					decisionContext: this.buildDecisionContext(ctx),
+				}
 			: {
-				configFingerprint: this.configFingerprint,
-			};
+					strategyConfigFingerprint: this.strategyConfigFingerprint,
+				};
 		return {
 			symbol: latest?.symbol ?? this.config.symbol,
 			intent: "NO_ACTION",

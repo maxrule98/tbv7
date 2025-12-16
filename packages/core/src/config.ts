@@ -17,6 +17,55 @@ export interface StrategyConfig {
 	[key: string]: unknown;
 }
 
+export type ConfigSourceType = "file" | "embedded" | "merged";
+
+export interface ConfigMetadata {
+	path?: string;
+	source: ConfigSourceType;
+	profile?: string;
+}
+
+const CONFIG_META_SYMBOL = Symbol.for("agenai.config.meta");
+
+const readConfigMetadata = (config: unknown): ConfigMetadata | null => {
+	if (!config || typeof config !== "object") {
+		return null;
+	}
+	const meta = (config as Record<PropertyKey, unknown>)[
+		CONFIG_META_SYMBOL as unknown as PropertyKey
+	];
+	return (meta as ConfigMetadata | undefined) ?? null;
+};
+
+const applyConfigMetadata = <T extends object>(
+	config: T,
+	metadata: ConfigMetadata
+): T => {
+	if (!config || typeof config !== "object") {
+		return config;
+	}
+	const existing = readConfigMetadata(config) ?? {};
+	const nextMeta: ConfigMetadata = {
+		...existing,
+		...metadata,
+	};
+	Object.defineProperty(config, CONFIG_META_SYMBOL, {
+		value: nextMeta,
+		enumerable: false,
+		configurable: true,
+		writable: true,
+	});
+	return config;
+};
+
+export const withConfigMetadata = <T extends object>(
+	config: T,
+	metadata: ConfigMetadata
+): T => applyConfigMetadata(config, metadata);
+
+export const getConfigMetadata = (config: unknown): ConfigMetadata | null =>
+	readConfigMetadata(config);
+
 let envLoaded = false;
 let loadedEnvPath: string | undefined;
 let cachedWorkspaceRoot: string | undefined;
@@ -204,13 +253,20 @@ export const loadExchangeConfig = (
 		apiKey: env.mexcApiKey,
 		apiSecret: env.mexcApiSecret,
 	};
-	return {
-		...exchangeFile,
-		id: profile,
-		testnet: exchangeFile.testnet,
-		defaultSymbol: env.defaultSymbol || exchangeFile.defaultSymbol,
-		credentials,
-	};
+	return withConfigMetadata(
+		{
+			...exchangeFile,
+			id: profile,
+			testnet: exchangeFile.testnet,
+			defaultSymbol: env.defaultSymbol || exchangeFile.defaultSymbol,
+			credentials,
+		},
+		{
+			source: "file",
+			path: exchangePath,
+			profile,
+		}
+	);
 };
 
 export const resolveStrategyConfigPath = (
@@ -247,10 +303,17 @@ export const loadStrategyConfig = (
 		);
 	}
 	getStrategyDefinition(strategyId);
-	return {
-		...file,
-		id: strategyId,
-	};
+	return withConfigMetadata(
+		{
+			...file,
+			id: strategyId,
+		},
+		{
+			source: "file",
+			path: strategyPath,
+			profile: strategyProfile,
+		}
+	);
 };
 
 export const loadRiskConfig = (
@@ -259,23 +322,36 @@ export const loadRiskConfig = (
 ): RiskConfig => {
 	const riskPath = path.join(configDir, "risk", `${riskProfile}.json`);
 	const file = readJsonFile<RiskConfigFile>(riskPath);
-	return {
-		maxLeverage: ensureNumber(file.maxLeverage, "risk.maxLeverage"),
-		riskPerTradePercent: resolveRiskPerTradePercent(file),
-		maxPositions: ensureNumber(file.maxPositions, "risk.maxPositions"),
-		slPct: ensureNumber(file.slPct, "risk.slPct"),
-		tpPct: ensureNumber(file.tpPct, "risk.tpPct"),
-		minPositionSize: ensureNumber(file.minPositionSize, "risk.minPositionSize"),
-		maxPositionSize: ensureNumber(file.maxPositionSize, "risk.maxPositionSize"),
-		trailingActivationPct: ensureNumber(
-			file.trailingActivationPct,
-			"risk.trailingActivationPct"
-		),
-		trailingTrailPct: ensureNumber(
-			file.trailingTrailPct,
-			"risk.trailingTrailPct"
-		),
-	};
+	return withConfigMetadata(
+		{
+			maxLeverage: ensureNumber(file.maxLeverage, "risk.maxLeverage"),
+			riskPerTradePercent: resolveRiskPerTradePercent(file),
+			maxPositions: ensureNumber(file.maxPositions, "risk.maxPositions"),
+			slPct: ensureNumber(file.slPct, "risk.slPct"),
+			tpPct: ensureNumber(file.tpPct, "risk.tpPct"),
+			minPositionSize: ensureNumber(
+				file.minPositionSize,
+				"risk.minPositionSize"
+			),
+			maxPositionSize: ensureNumber(
+				file.maxPositionSize,
+				"risk.maxPositionSize"
+			),
+			trailingActivationPct: ensureNumber(
+				file.trailingActivationPct,
+				"risk.trailingActivationPct"
+			),
+			trailingTrailPct: ensureNumber(
+				file.trailingTrailPct,
+				"risk.trailingTrailPct"
+			),
+		},
+		{
+			source: "file",
+			path: riskPath,
+			profile: riskProfile,
+		}
+	);
 };
 
 export const loadAccountConfig = (
@@ -283,7 +359,11 @@ export const loadAccountConfig = (
 	accountProfile = "paper"
 ): AccountConfig => {
 	const accountPath = path.join(configDir, "account", `${accountProfile}.json`);
-	return readJsonFile<AccountConfigFile>(accountPath);
+	return withConfigMetadata(readJsonFile<AccountConfigFile>(accountPath), {
+		source: "file",
+		path: accountPath,
+		profile: accountProfile,
+	});
 };
 
 export const loadAgenaiConfig = (

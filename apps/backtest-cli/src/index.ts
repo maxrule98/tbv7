@@ -3,7 +3,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import process from "node:process";
 import { StrategyId, getWorkspaceRoot } from "@agenai/core";
 import {
@@ -14,8 +13,7 @@ import {
 	runBacktest,
 	type RuntimeProfileMetadata,
 } from "@agenai/runtime";
-
-type ArgValue = string | boolean;
+import { parseCliArgs } from "./cliArgs";
 
 type BacktestResultPayload = Awaited<ReturnType<typeof runBacktest>>;
 
@@ -27,6 +25,8 @@ interface PersistContext {
 	endTimestamp: number;
 	profiles: RuntimeProfileMetadata;
 	strategyConfig: unknown;
+	strategyConfigFingerprint: string;
+	runtimeContextFingerprint: string;
 }
 
 const USAGE = `Usage:
@@ -50,40 +50,6 @@ Options:
   --json                   Print full JSON result payload
   --help                   Show this message
 `;
-
-const parseCliArgs = (argv: string[]): Record<string, ArgValue> => {
-	const args: Record<string, ArgValue> = {};
-	const positionals: string[] = [];
-	for (let i = 0; i < argv.length; i++) {
-		const token = argv[i];
-		if (!token.startsWith("--")) {
-			positionals.push(token);
-			continue;
-		}
-		const eqIdx = token.indexOf("=");
-		if (eqIdx !== -1) {
-			const key = token.slice(2, eqIdx);
-			const value = token.slice(eqIdx + 1);
-			args[key] = value;
-			continue;
-		}
-		const key = token.slice(2);
-		const next = argv[i + 1];
-		if (next && !next.startsWith("--")) {
-			args[key] = next;
-			i += 1;
-		} else {
-			args[key] = true;
-		}
-	}
-	if (positionals[0] && args.start === undefined) {
-		args.start = positionals[0];
-	}
-	if (positionals[1] && args.end === undefined) {
-		args.end = positionals[1];
-	}
-	return args;
-};
 
 const parseTimestamp = (value: string | undefined, label: string): number => {
 	if (!value) {
@@ -123,18 +89,6 @@ const persistBacktestResult = (
 	const fileName = `${context.strategyId}-${safeSymbol}-${context.timeframe}-${timestamp}.json`;
 	const outputDir = path.join(getWorkspaceRoot(), "output", "backtests");
 	fs.mkdirSync(outputDir, { recursive: true });
-	const fingerprint = createHash("sha1")
-		.update(
-			JSON.stringify({
-				strategyId: context.strategyId,
-				symbol: context.symbol,
-				timeframe: context.timeframe,
-				profiles: context.profiles,
-				strategyConfig: context.strategyConfig,
-			})
-		)
-		.digest("hex")
-		.slice(0, 12);
 	const payload = {
 		...result,
 		metadata: {
@@ -144,7 +98,8 @@ const persistBacktestResult = (
 			start: new Date(context.startTimestamp).toISOString(),
 			end: new Date(context.endTimestamp).toISOString(),
 			profiles: context.profiles,
-			configFingerprint: fingerprint,
+			strategyConfigFingerprint: context.strategyConfigFingerprint,
+			runtimeContextFingerprint: context.runtimeContextFingerprint,
 		},
 	};
 	const outputPath = path.join(outputDir, fileName);
@@ -294,6 +249,8 @@ const main = async (): Promise<void> => {
 		endTimestamp,
 		profiles: runtimeSnapshot.config.profiles,
 		strategyConfig,
+		strategyConfigFingerprint: runtimeSnapshot.strategyConfigFingerprint,
+		runtimeContextFingerprint: runtimeSnapshot.runtimeContextFingerprint,
 	});
 
 	if (withMetrics) {

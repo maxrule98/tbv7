@@ -17,6 +17,7 @@ import {
 import { RiskManager, TradePlan } from "@agenai/risk-engine";
 import type { TraderStrategy } from "./types";
 import type { StrategyRuntimeMetadata } from "./runtimeFactory";
+import type { StrategyRuntimeFingerprints } from "./fingerprints";
 
 export const runtimeLogger = createLogger("trader-runtime");
 
@@ -55,7 +56,7 @@ export interface StrategyRuntimeLogContext {
 	mode: StrategyRuntimeMode;
 	strategyId: StrategyId;
 	strategyConfig: StrategyConfig;
-	configFingerprint: string;
+	fingerprints: StrategyRuntimeFingerprints;
 	metadata: StrategyRuntimeMetadata;
 	source: StrategySource;
 	builderName?: string;
@@ -72,7 +73,8 @@ export const logStrategyRuntimeMetadata = (
 	runtimeLogger.info("strategy_runtime_metadata", {
 		mode: context.mode,
 		strategyId: context.strategyId,
-		configFingerprint: context.configFingerprint,
+		strategyConfigFingerprint: context.fingerprints.strategyConfigFingerprint,
+		runtimeContextFingerprint: context.fingerprints.runtimeContextFingerprint,
 		execution: context.metadata.runtimeParams,
 		trackedTimeframes: context.metadata.trackedTimeframes,
 		warmupByTimeframe: warmupEntries,
@@ -162,9 +164,27 @@ export const logRiskConfig = (risk: RiskConfig): void => {
 	});
 };
 
+export const withRuntimeFingerprints = (
+	intent: TradeIntent,
+	fingerprints?: StrategyRuntimeFingerprints
+): TradeIntent => {
+	if (!fingerprints) {
+		return intent;
+	}
+	return {
+		...intent,
+		metadata: {
+			...(intent.metadata ?? {}),
+			strategyConfigFingerprint: fingerprints.strategyConfigFingerprint,
+			runtimeContextFingerprint: fingerprints.runtimeContextFingerprint,
+		},
+	};
+};
+
 export const logStrategyDecision = (
 	candle: Candle,
-	intent: TradeIntent
+	intent: TradeIntent,
+	fingerprints?: StrategyRuntimeFingerprints
 ): void => {
 	const payload: Record<string, unknown> = {
 		symbol: candle.symbol,
@@ -174,9 +194,12 @@ export const logStrategyDecision = (
 		intent: intent.intent,
 		reason: intent.reason,
 	};
-	const fingerprint = readConfigFingerprint(intent);
-	if (fingerprint) {
-		payload.configFingerprint = fingerprint;
+	const fingerprintContext = fingerprints ?? readDecisionFingerprints(intent);
+	if (fingerprintContext) {
+		payload.strategyConfigFingerprint =
+			fingerprintContext.strategyConfigFingerprint ?? null;
+		payload.runtimeContextFingerprint =
+			fingerprintContext.runtimeContextFingerprint ?? null;
 	}
 	const decisionContext = extractDecisionContext(intent);
 	if (decisionContext) {
@@ -185,8 +208,32 @@ export const logStrategyDecision = (
 	runtimeLogger.info("strategy_decision", payload);
 };
 
-const readConfigFingerprint = (intent: TradeIntent): string | null => {
-	const value = intent.metadata?.configFingerprint as unknown;
+const readDecisionFingerprints = (
+	intent: TradeIntent
+): StrategyRuntimeFingerprints | null => {
+	const configValue = readIntentFingerprint(
+		intent,
+		"strategyConfigFingerprint"
+	);
+	const runtimeValue = readIntentFingerprint(
+		intent,
+		"runtimeContextFingerprint"
+	);
+	if (!configValue || !runtimeValue) {
+		return null;
+	}
+	return {
+		strategyConfigFingerprint: configValue,
+		runtimeContextFingerprint: runtimeValue,
+	};
+};
+
+const readIntentFingerprint = (
+	intent: TradeIntent,
+	key: string
+): string | null => {
+	const metadata = intent.metadata as Record<string, unknown> | undefined;
+	const value = metadata?.[key];
 	return typeof value === "string" && value.length ? value : null;
 };
 
@@ -431,7 +478,8 @@ export const maybeHandleForcedExit = async (
 	riskManager: RiskManager,
 	executionEngine: ExecutionEngine,
 	accountEquity: number,
-	onExecuted?: ExecutionHook
+	onExecuted?: ExecutionHook,
+	fingerprints?: StrategyRuntimeFingerprints
 ): Promise<boolean> => {
 	if (positionState.side === "FLAT" || positionState.size <= 0) {
 		return false;
@@ -468,18 +516,22 @@ export const maybeHandleForcedExit = async (
 		action: "CLOSE",
 		side: orderSide,
 	};
+	const fingerprintedIntent = withRuntimeFingerprints(
+		forcedIntent,
+		fingerprints
+	);
 
-	logStrategyDecision(lastCandle, forcedIntent);
+	logStrategyDecision(lastCandle, fingerprintedIntent, fingerprints);
 
 	const plan = riskManager.plan(
-		forcedIntent,
+		fingerprintedIntent,
 		lastCandle.close,
 		accountEquity,
 		positionState
 	);
 	if (!plan) {
 		logExecutionSkipped(
-			forcedIntent,
+			fingerprintedIntent,
 			positionState.side,
 			"forced_exit_plan_rejected"
 		);
@@ -492,7 +544,7 @@ export const maybeHandleForcedExit = async (
 		return true;
 	}
 
-	logTradePlan(plan, lastCandle, forcedIntent);
+	logTradePlan(plan, lastCandle, fingerprintedIntent);
 	try {
 		const result = await executionEngine.execute(plan, {
 			price: lastCandle.close,
@@ -522,7 +574,8 @@ export const maybeHandleTrailingStop = async (
 	executionEngine: ExecutionEngine,
 	accountEquity: number,
 	riskConfig: RiskConfig,
-	onExecuted?: ExecutionHook
+	onExecuted?: ExecutionHook,
+	fingerprints?: StrategyRuntimeFingerprints
 ): Promise<boolean> => {
 	if (positionState.side === "FLAT" || positionState.size <= 0) {
 		return false;
@@ -620,18 +673,22 @@ export const maybeHandleTrailingStop = async (
 		action: "CLOSE",
 		side: orderSide,
 	};
+	const fingerprintedIntent = withRuntimeFingerprints(
+		forcedIntent,
+		fingerprints
+	);
 
-	logStrategyDecision(lastCandle, forcedIntent);
+	logStrategyDecision(lastCandle, fingerprintedIntent, fingerprints);
 
 	const plan = riskManager.plan(
-		forcedIntent,
+		fingerprintedIntent,
 		lastCandle.close,
 		accountEquity,
 		positionState
 	);
 	if (!plan) {
 		logExecutionSkipped(
-			forcedIntent,
+			fingerprintedIntent,
 			positionState.side,
 			"trailing_exit_plan_rejected"
 		);
@@ -644,7 +701,7 @@ export const maybeHandleTrailingStop = async (
 		return true;
 	}
 
-	logTradePlan(plan, lastCandle, forcedIntent);
+	logTradePlan(plan, lastCandle, fingerprintedIntent);
 	try {
 		const result = await executionEngine.execute(plan, {
 			price: lastCandle.close,

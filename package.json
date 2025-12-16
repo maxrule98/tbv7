@@ -12,6 +12,7 @@
 		"metrics:process": "pnpm --filter @agenai/metrics run start",
 		"strategy:list": "ts-node packages/core/src/strategies/listStrategies.ts",
 		"validate:strategies": "ts-node packages/core/src/strategies/validateStrategyStructure.ts",
+		"runtime:print-config": "ts-node scripts/runtimePrintConfig.ts",
 		"clean": "pnpm -r exec -- rm -rf dist build .turbo && rm -rf output/",
 		"format": "prettier --write .",
 		"trader:build": "pnpm --filter @agenai/trader-cli run build",

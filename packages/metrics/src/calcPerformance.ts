@@ -23,8 +23,17 @@ interface EquityPoint {
 	equity: number;
 }
 
+interface BacktestResultMetadata {
+	strategyConfigFingerprint?: string;
+	runtimeContextFingerprint?: string;
+}
+
+type BacktestResultWithMetadata = BacktestResult & {
+	metadata?: BacktestResultMetadata;
+};
+
 export const calculatePerformance = (
-	result: BacktestResult,
+	result: BacktestResultWithMetadata,
 	options: CalcPerformanceOptions = {}
 ): PerformanceReport => {
 	const { config, trades } = result;
@@ -133,7 +142,7 @@ export const calculatePerformance = (
 			: 0;
 	const calmarRatio = maxDrawdownPct > 0 ? cagr / maxDrawdownPct : 0;
 
-	const fingerprint = createHash("sha1")
+	const fallbackFingerprint = createHash("sha1")
 		.update(
 			JSON.stringify({
 				strategyId: config.strategyId,
@@ -144,6 +153,9 @@ export const calculatePerformance = (
 		)
 		.digest("hex")
 		.slice(0, 12);
+
+	const strategyConfigFingerprint =
+		result.metadata?.strategyConfigFingerprint ?? fallbackFingerprint;
 
 	const summary: MetricsSummary = {
 		netProfit,
@@ -186,7 +198,7 @@ export const calculatePerformance = (
 			initialBalance,
 			finalBalance: finalEquity,
 			tradeCount,
-			configFingerprint: fingerprint,
+			strategyConfigFingerprint,
 		},
 	};
 

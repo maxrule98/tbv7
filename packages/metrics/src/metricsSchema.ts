@@ -62,7 +62,7 @@ export interface PerformanceMetadata {
 	initialBalance: number;
 	finalBalance: number;
 	tradeCount: number;
-	configFingerprint: string;
+	strategyConfigFingerprint: string;
 }
 
 export interface MetricsSummary {

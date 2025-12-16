@@ -6,13 +6,18 @@ import type {
 	StrategyId,
 	StrategySelectionResult,
 } from "@agenai/core";
-import type { LoadedRuntimeConfig } from "./loadRuntimeConfig";
+import type {
+	LoadedRuntimeConfig,
+	RuntimeConfigResolutionTrace,
+	RuntimeResolvedPathSummary,
+} from "./loadRuntimeConfig";
 import { createRuntimeSnapshot } from "./runtimeSnapshot";
 import {
 	logStrategyRuntimeMetadata,
 	logTimeframeFingerprint,
 	runtimeLogger,
 } from "./runtimeShared";
+import type { StrategyRuntimeFingerprints } from "./fingerprints";
 
 const baseStrategyId = "ultra_aggressive_btc_usdt" as StrategyId;
 
@@ -80,6 +85,39 @@ const selection: StrategySelectionResult = {
 	invalidSources: [],
 };
 
+const createPathSummary = (
+	absolute: string,
+	relative = absolute
+): RuntimeResolvedPathSummary => ({
+	absolute,
+	relativeToWorkspace: relative,
+	relativeToCwd: relative,
+});
+
+const mockResolution: RuntimeConfigResolutionTrace = {
+	cwd: "/workspace/apps/trader-server",
+	workspaceRoot: "/workspace",
+	envPath: createPathSummary("/workspace/.env", ".env"),
+	configDir: createPathSummary("/workspace/config", "config"),
+	strategyDir: createPathSummary("/workspace/config", "config"),
+	accountConfigPath: createPathSummary(
+		"/workspace/config/account/paper.json",
+		"config/account/paper.json"
+	),
+	strategyConfigPath: createPathSummary(
+		"/workspace/config/strategies/vwap.json",
+		"config/strategies/vwap.json"
+	),
+	riskConfigPath: createPathSummary(
+		"/workspace/config/risk/default.json",
+		"config/risk/default.json"
+	),
+	exchangeConfigPath: createPathSummary(
+		"/workspace/config/exchange/mexc.json",
+		"config/exchange/mexc.json"
+	),
+};
+
 const runtimeConfig: LoadedRuntimeConfig = {
 	agenaiConfig,
 	accountConfig,
@@ -93,6 +131,7 @@ const runtimeConfig: LoadedRuntimeConfig = {
 	},
 	selection,
 	profiles: {},
+	resolution: mockResolution,
 };
 
 describe("runtime parity", () => {
@@ -113,12 +152,16 @@ describe("runtime parity", () => {
 			timeframe: snapshot.metadata.runtimeParams.executionTimeframe,
 			useTestnet: false,
 		};
+		const fingerprints: StrategyRuntimeFingerprints = {
+			strategyConfigFingerprint: snapshot.strategyConfigFingerprint,
+			runtimeContextFingerprint: snapshot.runtimeContextFingerprint,
+		};
 
 		logStrategyRuntimeMetadata({
 			mode: "backtest",
 			strategyId: snapshot.config.strategyId,
 			strategyConfig: snapshot.config.strategyConfig,
-			configFingerprint: snapshot.configFingerprint,
+			fingerprints,
 			metadata: snapshot.metadata,
 			source: "builder",
 			builderName: "parity",
@@ -134,7 +177,7 @@ describe("runtime parity", () => {
 			mode: "live",
 			strategyId: snapshot.config.strategyId,
 			strategyConfig: snapshot.config.strategyConfig,
-			configFingerprint: snapshot.configFingerprint,
+			fingerprints,
 			metadata: snapshot.metadata,
 			source: "builder",
 			builderName: "parity",
@@ -155,7 +198,10 @@ describe("runtime parity", () => {
 		const [, firstMetadataPayload] = firstMetadata;
 		const [, secondMetadataPayload] = secondMetadata;
 		expect(firstMetadataPayload).toMatchObject({
-			configFingerprint: secondMetadataPayload.configFingerprint,
+			strategyConfigFingerprint:
+				secondMetadataPayload.strategyConfigFingerprint,
+			runtimeContextFingerprint:
+				secondMetadataPayload.runtimeContextFingerprint,
 		});
 
 		const candles = [

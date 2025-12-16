@@ -37,6 +37,7 @@ import {
 	maybeHandleTrailingStop,
 	runtimeLogger,
 	snapshotPaperAccount,
+	withRuntimeFingerprints,
 } from "./runtimeShared";
 import type { StrategyRuntimeBuilder } from "./runtimeFactory";
 import type { TraderStrategy } from "./types";
@@ -46,6 +47,8 @@ import {
 	createRuntime,
 	type RuntimeSnapshot,
 } from "./runtimeSnapshot";
+import { buildRuntimeFingerprintLogPayload } from "./runtimeFingerprint";
+import type { StrategyRuntimeFingerprints } from "./fingerprints";
 export type { TraderStrategy } from "./types";
 
 export const DEFAULT_POLL_INTERVAL_MS = 10_000;
@@ -134,11 +137,15 @@ export const startTrader = async (
 			: (options.strategyBuilder?.name ?? "live_strategy_builder"),
 	});
 	const { strategy, source: strategySource } = runtime;
+	const runtimeFingerprints: StrategyRuntimeFingerprints = {
+		strategyConfigFingerprint: runtimeSnapshot.strategyConfigFingerprint,
+		runtimeContextFingerprint: runtimeSnapshot.runtimeContextFingerprint,
+	};
 	logStrategyRuntimeMetadata({
 		mode: executionMode,
 		strategyId: resolvedStrategyId,
 		strategyConfig: agenaiConfig.strategy,
-		configFingerprint: runtimeSnapshot.configFingerprint,
+		fingerprints: runtimeFingerprints,
 		metadata: runtimeMetadata,
 		source: strategySource,
 		builderName: runtime.builderName,
@@ -148,6 +155,11 @@ export const startTrader = async (
 			timeframe: instrument.timeframe,
 			pollIntervalMs: traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
 		},
+	});
+	runtimeLogger.info("runtime_fingerprints", {
+		mode: executionMode,
+		strategyId: resolvedStrategyId,
+		...buildRuntimeFingerprintLogPayload(runtimeSnapshot),
 	});
 	const riskManager = new RiskManager(agenaiConfig.risk);
 	const paperAccount =
@@ -221,7 +233,8 @@ export const startTrader = async (
 		candlesBySymbol,
 		lastTimestampBySymbol,
 		traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
-		executionMode
+		executionMode,
+		runtimeFingerprints
 	);
 };
 
@@ -288,7 +301,8 @@ const startPolling = async (
 	candlesBySymbol: Map<string, Candle[]>,
 	lastTimestampBySymbol: Map<string, number>,
 	pollIntervalMs: number,
-	runtimeMode: StrategyRuntimeMode
+	runtimeMode: StrategyRuntimeMode,
+	fingerprints: StrategyRuntimeFingerprints
 ): Promise<never> => {
 	let fallbackEquity = defaultEquity;
 	const subscription = dataProvider.createLiveSubscription({
@@ -337,7 +351,9 @@ const startPolling = async (
 			latest,
 			riskManager,
 			executionEngine,
-			accountEquity
+			accountEquity,
+			undefined,
+			fingerprints
 		);
 		if (forcedExitHandled) {
 			const accountSnapshot = logAndSnapshotPosition(
@@ -359,7 +375,9 @@ const startPolling = async (
 			riskManager,
 			executionEngine,
 			accountEquity,
-			riskConfig
+			riskConfig,
+			undefined,
+			fingerprints
 		);
 		if (trailingExitHandled) {
 			const accountSnapshot = logAndSnapshotPosition(
@@ -377,28 +395,30 @@ const startPolling = async (
 		const intent = enrichIntentMetadata(
 			await strategy.decide(buffer, positionState.side)
 		);
-		logStrategyDecision(latest, intent);
+		const fingerprintedIntent = withRuntimeFingerprints(intent, fingerprints);
+		logStrategyDecision(latest, fingerprintedIntent, fingerprints);
 
 		const plan = riskManager.plan(
-			intent,
+			fingerprintedIntent,
 			latest.close,
 			accountEquity,
 			positionState
 		);
 		if (!plan) {
-			if (intent.intent !== "NO_ACTION") {
+			if (fingerprintedIntent.intent !== "NO_ACTION") {
 				const reason =
-					intent.intent === "CLOSE_LONG" || intent.intent === "CLOSE_SHORT"
+					fingerprintedIntent.intent === "CLOSE_LONG" ||
+					fingerprintedIntent.intent === "CLOSE_SHORT"
 						? "no_position_to_close"
 						: "risk_plan_rejected";
-				logExecutionSkipped(intent, positionState.side, reason);
+				logExecutionSkipped(fingerprintedIntent, positionState.side, reason);
 			}
 		} else {
 			const skipReason = getPreExecutionSkipReason(plan, positionState);
 			if (skipReason) {
 				logExecutionSkipped(plan, positionState.side, skipReason);
 			} else {
-				logTradePlan(plan, latest, intent);
+				logTradePlan(plan, latest, fingerprintedIntent);
 				try {
 					const result = await executionEngine.execute(plan, {
 						price: latest.close,

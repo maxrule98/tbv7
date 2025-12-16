@@ -1,4 +1,3 @@
-import { hashJson } from "@agenai/core";
 import {
 	loadRuntimeConfig,
 	type LoadRuntimeConfigOptions,
@@ -12,6 +11,10 @@ import {
 	type StrategyRuntimeMetadata,
 } from "./runtimeFactory";
 import type { TraderStrategy } from "./types";
+import {
+	createRuntimeFingerprintCache,
+	type RuntimeFingerprintCache,
+} from "./runtimeFingerprint";
 
 export interface RuntimeSnapshotOptions extends LoadRuntimeConfigOptions {
 	runtimeConfig?: LoadedRuntimeConfig;
@@ -25,7 +28,15 @@ export interface RuntimeSnapshotOptions extends LoadRuntimeConfigOptions {
 export interface RuntimeSnapshot {
 	config: LoadedRuntimeConfig;
 	metadata: StrategyRuntimeMetadata;
-	configFingerprint: string;
+	strategyConfigFingerprint: string;
+	runtimeContextFingerprint: string;
+	riskConfigFingerprint: string;
+	strategyConfigPath?: string;
+	riskConfigPath?: string;
+	strategyConfigFileHash?: string | null;
+	riskConfigFileHash?: string | null;
+	fingerprintCache: RuntimeFingerprintCache;
+	resolution: LoadedRuntimeConfig["resolution"];
 }
 
 export interface CreateRuntimeOptions {
@@ -45,11 +56,23 @@ export const createRuntimeSnapshot = (
 			maxCandlesOverride: options.maxCandlesOverride,
 		}
 	);
+	const fingerprintCache = createRuntimeFingerprintCache(
+		runtimeConfig,
+		metadata
+	);
 
 	return {
 		config: runtimeConfig,
 		metadata,
-		configFingerprint: hashJson(runtimeConfig.strategyConfig),
+		strategyConfigFingerprint: fingerprintCache.strategy.fingerprint,
+		runtimeContextFingerprint: fingerprintCache.runtimeContext.fingerprint,
+		riskConfigFingerprint: fingerprintCache.risk.fingerprint,
+		strategyConfigPath: fingerprintCache.strategy.path,
+		riskConfigPath: fingerprintCache.risk.path,
+		strategyConfigFileHash: fingerprintCache.strategy.fileHash ?? null,
+		riskConfigFileHash: fingerprintCache.risk.fileHash ?? null,
+		fingerprintCache,
+		resolution: runtimeConfig.resolution,
 	};
 };
 

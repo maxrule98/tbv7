@@ -45,6 +45,7 @@ import {
 	runtimeLogger,
 	snapshotPaperAccount,
 	ExecutionHook,
+	withRuntimeFingerprints,
 } from "../runtimeShared";
 import type { TraderStrategy } from "../types";
 import { WarmupMap } from "../runtimeFactory";
@@ -61,6 +62,7 @@ import {
 	BacktestResult,
 	BacktestTrade,
 } from "./backtestTypes";
+import { buildRuntimeFingerprintLogPayload } from "../runtimeFingerprint";
 
 export interface RunBacktestOptions {
 	runtimeSnapshot?: RuntimeSnapshot;
@@ -112,6 +114,11 @@ export const runBacktest = async (
 	);
 
 	const runtimeBootstrap = runtimeSnapshot.config;
+	const runtimeFingerprints = {
+		strategyConfigFingerprint: runtimeSnapshot.strategyConfigFingerprint,
+		runtimeContextFingerprint: runtimeSnapshot.runtimeContextFingerprint,
+	};
+
 	const agenaiConfig = runtimeBootstrap.agenaiConfig;
 	const resolvedStrategyId = runtimeBootstrap.strategyId;
 	const runtimeMetadata = runtimeSnapshot.metadata;
@@ -207,7 +214,7 @@ export const runBacktest = async (
 		mode: "backtest",
 		strategyId: resolvedStrategyId,
 		strategyConfig: agenaiConfig.strategy,
-		configFingerprint: runtimeSnapshot.configFingerprint,
+		fingerprints: runtimeFingerprints,
 		metadata: runtimeMetadata,
 		source: strategySource,
 		builderName: runtime.builderName,
@@ -221,6 +228,11 @@ export const runBacktest = async (
 			timeframe,
 			maxCandles: effectiveConfig.maxCandles ?? null,
 		},
+	});
+	runtimeLogger.info("runtime_fingerprints", {
+		mode: "backtest",
+		strategyId: resolvedStrategyId,
+		...buildRuntimeFingerprintLogPayload(runtimeSnapshot),
 	});
 
 	logStrategyLoaded({
@@ -277,7 +289,8 @@ export const runBacktest = async (
 			riskManager,
 			executionEngine,
 			accountEquity,
-			recordHook
+			recordHook,
+			runtimeFingerprints
 		);
 		if (forcedExitHandled) {
 			const accountSnapshot = logAndSnapshotPosition(
@@ -301,7 +314,8 @@ export const runBacktest = async (
 			executionEngine,
 			accountEquity,
 			agenaiConfig.risk,
-			recordHook
+			recordHook,
+			runtimeFingerprints
 		);
 		if (trailingExitHandled) {
 			const accountSnapshot = logAndSnapshotPosition(
@@ -320,29 +334,34 @@ export const runBacktest = async (
 		const intent = enrichIntentMetadata(
 			await strategy.decide(buffer, positionState.side)
 		);
-		logStrategyDecision(candle, intent);
+		const fingerprintedIntent = withRuntimeFingerprints(
+			intent,
+			runtimeFingerprints
+		);
+		logStrategyDecision(candle, fingerprintedIntent, runtimeFingerprints);
 
 		const plan = riskManager.plan(
-			intent,
+			fingerprintedIntent,
 			candle.close,
 			accountEquity,
 			positionState
 		);
 
 		if (!plan) {
-			if (intent.intent !== "NO_ACTION") {
+			if (fingerprintedIntent.intent !== "NO_ACTION") {
 				const reason =
-					intent.intent === "CLOSE_LONG" || intent.intent === "CLOSE_SHORT"
+					fingerprintedIntent.intent === "CLOSE_LONG" ||
+					fingerprintedIntent.intent === "CLOSE_SHORT"
 						? "no_position_to_close"
 						: "risk_plan_rejected";
-				logExecutionSkipped(intent, positionState.side, reason);
+				logExecutionSkipped(fingerprintedIntent, positionState.side, reason);
 			}
 		} else {
 			const skipReason = getPreExecutionSkipReason(plan, positionState);
 			if (skipReason) {
 				logExecutionSkipped(plan, positionState.side, skipReason);
 			} else {
-				logTradePlan(plan, candle, intent);
+				logTradePlan(plan, candle, fingerprintedIntent);
 				try {
 					const result = await executionEngine.execute(plan, {
 						price: candle.close,
