@@ -109,6 +109,15 @@ importers:
         specifier: ^5.0.5
         version: 5.0.10
 
+  packages/exchange-binance:
+    dependencies:
+      '@agenai/core':
+        specifier: workspace:*
+        version: link:../core
+      ccxt:
+        specifier: ^4.3.81
+        version: 4.5.19
+
   packages/exchange-mexc:
     dependencies:
       '@agenai/core':
@@ -159,6 +168,9 @@ importers:
       '@agenai/data':
         specifier: workspace:*
         version: link:../data
+      '@agenai/exchange-binance':
+        specifier: workspace:*
+        version: link:../exchange-binance
       '@agenai/exchange-mexc':
         specifier: workspace:*
         version: link:../exchange-mexc

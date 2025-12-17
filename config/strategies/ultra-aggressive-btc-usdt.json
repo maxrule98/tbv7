@@ -46,7 +46,7 @@
 		"rsiOversold": 40
 	},
 	"risk": {
-		"riskPerTradePct": 0.035,
+		"riskPerTradePct": 0.03,
 		"atrStopMultiple": 1.1,
 		"partialTpRR": 0.55,
 		"finalTpRR": 1.8,
@@ -84,7 +84,7 @@
 	"enableVolatilityFadeExit": false,
 	"allowBreakoutsWhenRSIOverbought": true,
 	"reversionNeedsTwoOfThreeConditions": false,
-	"maxDrawdownPerTradePct": 0.035,
+	"maxDrawdownPerTradePct": 0.03,
 	"cooldownAfterStopoutBars": 2,
 	"dailyDrawdownLimitPct": 0.12
 }

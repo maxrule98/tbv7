@@ -13,8 +13,10 @@ import {
 	DefaultDataProvider,
 	type DataProvider,
 	type HistoricalSeriesRequest,
+	type MarketDataClient,
 	type TimeframeSeries,
 } from "@agenai/data";
+import { BinanceSpotClient } from "@agenai/exchange-binance";
 import { MexcClient } from "@agenai/exchange-mexc";
 import {
 	ExecutionEngine,
@@ -78,6 +80,7 @@ export interface RunBacktestOptions {
 	strategyOverride?: TraderStrategy;
 	client?: MexcClient;
 	dataProvider?: DataProvider;
+	marketDataClient?: MarketDataClient;
 	timeframeData?: Record<string, Candle[]>;
 }
 
@@ -144,8 +147,12 @@ export const runBacktest = async (
 			useFutures: true,
 		});
 
+	const marketDataClient: MarketDataClient =
+		options.marketDataClient ?? new BinanceSpotClient();
+
 	const dataProvider =
-		options.dataProvider ?? new DefaultDataProvider({ client });
+		options.dataProvider ??
+		new DefaultDataProvider({ client: marketDataClient });
 
 	const riskManager = new RiskManager(agenaiConfig.risk);
 	const initialBalance =
@@ -270,6 +277,11 @@ export const runBacktest = async (
 			indexByTimeframe,
 			candle.timestamp
 		);
+
+		// Skip strategy execution for warmup candles before startTimestamp
+		if (candle.timestamp < effectiveConfig.startTimestamp) {
+			continue;
+		}
 
 		const buffer = await cache.getCandles(timeframe);
 		if (!buffer.length) {
@@ -421,7 +433,8 @@ const primeCacheWithWarmup = (
 	series: TimeframeSeries[],
 	cache: BacktestTimeframeCache,
 	startTimestamp: number
-): void => {
+): number => {
+	let warmupCandleCount = 0;
 	for (const frame of series) {
 		if (!frame.candles.length) {
 			continue;
@@ -435,9 +448,10 @@ const primeCacheWithWarmup = (
 		}
 		if (partition > 0) {
 			cache.setCandles(frame.timeframe, frame.candles.slice(0, partition));
-			frame.candles = frame.candles.slice(partition);
+			warmupCandleCount += partition;
 		}
 	}
+	return warmupCandleCount;
 };
 
 const loadTimeframeSeries = async (
