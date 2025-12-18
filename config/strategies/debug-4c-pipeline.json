@@ -1,0 +1,14 @@
+{
+	"id": "debug_4c_pipeline",
+	"name": "Debug 4C Pipeline",
+	"symbol": "BTC/USDT",
+	"timeframes": {
+		"execution": "1m"
+	},
+	"historyWindowCandles": 20,
+	"cacheTTLms": 1000,
+	"warmupPeriods": {
+		"default": 0,
+		"1m": 0
+	}
+}
