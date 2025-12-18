@@ -37,3 +37,11 @@ export const normalizeSymbolForVenue = (
 			return trimmed;
 	}
 };
+
+export const toCanonicalSymbol = (symbol: string): string => {
+	const trimmed = symbol.trim();
+	if (!trimmed) {
+		return symbol;
+	}
+	return ensureSlashSymbol(trimmed).toUpperCase();
+};

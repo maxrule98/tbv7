@@ -3,7 +3,7 @@ import { Candle } from "@agenai/core";
 import { timeframeToMs } from "@agenai/data";
 import { BinanceUsdMClient } from "@agenai/exchange-binance";
 import { runtimeLogger } from "../runtimeShared";
-import { normalizeSymbolForVenue } from "../symbols";
+import { normalizeSymbolForVenue, toCanonicalSymbol } from "../symbols";
 import {
 	ClosedCandleEvent,
 	ClosedCandleHandler,
@@ -17,6 +17,11 @@ import {
 const STREAM_ENDPOINT = "wss://fstream.binance.com/stream";
 const DEFAULT_BOOTSTRAP_LIMIT = 500;
 const GAP_FETCH_PADDING = 2;
+const POLL_GRACE_FACTOR = 1.5;
+const MIN_POLL_GRACE_MS = 5_000;
+const MAX_REPAIR_CANDLES = 50;
+const WS_HEALTH_FACTOR = 1.75;
+const MIN_WS_HEALTH_MS = 10_000;
 
 export class BinanceUsdMMarketDataProvider implements MarketDataProvider {
 	readonly venue = "binance";
@@ -70,7 +75,11 @@ class BinanceUsdMClosedCandleFeed implements MarketDataFeed {
 	private readonly listeners = new Set<ClosedCandleHandler>();
 	private readonly timeframes: string[];
 	private readonly timeframeMs: Map<string, number>;
-	private readonly lastProcessed = new Map<string, number>();
+	private readonly canonicalSymbol: string;
+	private readonly identityByTimeframe = new Map<string, string>();
+	private readonly lastEmitted = new Map<string, number>();
+	private readonly pendingEmissions = new Map<string, Set<number>>();
+	private readonly lastWsArrival = new Map<string, number>();
 	private readonly arrivalSamples = new Map<string, number[]>();
 	private readonly wsSymbol: string;
 	private ws: WebSocket | null = null;
@@ -84,6 +93,10 @@ class BinanceUsdMClosedCandleFeed implements MarketDataFeed {
 		this.timeframeMs = new Map(
 			this.timeframes.map((tf) => [tf, timeframeToMs(tf)])
 		);
+		this.canonicalSymbol = toCanonicalSymbol(options.symbol);
+		for (const timeframe of this.timeframes) {
+			this.identityByTimeframe.set(timeframe, this.buildIdentityKey(timeframe));
+		}
 		this.wsSymbol = normalizeSymbolForVenue("binance", options.symbol)
 			.toLowerCase()
 			.replace(/[^a-z0-9]/g, "");
@@ -218,7 +231,7 @@ class BinanceUsdMClosedCandleFeed implements MarketDataFeed {
 
 	private mapCandle(kline: Record<string, unknown>, timeframe: string): Candle {
 		return {
-			symbol: this.options.symbol,
+			symbol: this.canonicalSymbol,
 			timeframe,
 			timestamp: Number(kline.t ?? 0),
 			open: Number(kline.o ?? 0),
@@ -229,6 +242,20 @@ class BinanceUsdMClosedCandleFeed implements MarketDataFeed {
 		};
 	}
 
+	private normalizeCandle(candle: Candle, timeframe: string): Candle {
+		if (
+			candle.symbol === this.canonicalSymbol &&
+			candle.timeframe === timeframe
+		) {
+			return candle;
+		}
+		return {
+			...candle,
+			symbol: this.canonicalSymbol,
+			timeframe,
+		};
+	}
+
 	private async handleClosedCandle(
 		timeframe: string,
 		candle: Candle,
@@ -236,30 +263,14 @@ class BinanceUsdMClosedCandleFeed implements MarketDataFeed {
 		source: ClosedCandleEvent["source"],
 		gapFilled = false
 	): Promise<void> {
-		const tfMs = this.timeframeMs.get(timeframe);
-		if (!tfMs) {
-			return;
-		}
-		const lastTs = this.lastProcessed.get(timeframe) ?? 0;
-		if (lastTs && candle.timestamp <= lastTs) {
-			return;
-		}
-
-		if (lastTs && candle.timestamp > lastTs + tfMs) {
-			const missing = Math.floor((candle.timestamp - lastTs) / tfMs) - 1;
-			runtimeLogger.warn("candle_gap_detected", {
-				venue: this.options.venue,
-				symbol: this.options.symbol,
-				timeframe,
-				gapSize: missing,
-				lastTimestamp: lastTs,
-				currentTimestamp: candle.timestamp,
-			});
-			await this.repairGap(timeframe, lastTs + tfMs, candle.timestamp, tfMs);
-		}
-
-		await this.emitEvent(timeframe, candle, receivedAt, source, gapFilled);
-		this.lastProcessed.set(timeframe, candle.timestamp);
+		const normalized = this.normalizeCandle(candle, timeframe);
+		await this.processCandle(
+			timeframe,
+			normalized,
+			receivedAt,
+			source,
+			gapFilled
+		);
 	}
 
 	private async repairGap(
@@ -283,16 +294,25 @@ class BinanceUsdMClosedCandleFeed implements MarketDataFeed {
 					candle.timestamp >= startTimestamp && candle.timestamp < endTimestamp
 			)
 			.sort((a, b) => a.timestamp - b.timestamp);
-		for (const candle of missingCandles) {
-			await this.emitEvent(timeframe, candle, Date.now(), "rest", true);
-			this.lastProcessed.set(timeframe, candle.timestamp);
+		const normalizedCandles = missingCandles.map((candle) =>
+			this.normalizeCandle(candle, timeframe)
+		);
+		for (const candle of normalizedCandles) {
+			await this.processCandle(
+				timeframe,
+				candle,
+				Date.now(),
+				"rest",
+				true,
+				true
+			);
 		}
-		if (missingCandles.length) {
+		if (normalizedCandles.length) {
 			runtimeLogger.info("candle_gap_repaired", {
 				venue: this.options.venue,
-				symbol: this.options.symbol,
+				symbol: this.canonicalSymbol,
 				timeframe,
-				repairedCandles: missingCandles.length,
+				repairedCandles: normalizedCandles.length,
 			});
 		}
 	}
@@ -310,7 +330,7 @@ class BinanceUsdMClosedCandleFeed implements MarketDataFeed {
 		this.recordArrival(timeframe, arrivalDelayMs);
 		const event: ClosedCandleEvent = {
 			venue: this.options.venue,
-			symbol: this.options.symbol,
+			symbol: this.canonicalSymbol,
 			timeframe,
 			candle,
 			arrivalDelayMs,
@@ -327,6 +347,71 @@ class BinanceUsdMClosedCandleFeed implements MarketDataFeed {
 			gapFilled,
 		});
 		await this.notifyListeners(event);
+	}
+
+	private async processCandle(
+		timeframe: string,
+		candle: Candle,
+		receivedAt: number,
+		source: ClosedCandleEvent["source"],
+		gapFilled: boolean,
+		skipGapDetection = false
+	): Promise<void> {
+		const tfMs = this.timeframeMs.get(timeframe);
+		if (!tfMs) {
+			return;
+		}
+		const key = this.identityKey(timeframe);
+		const lastTs = this.lastEmitted.get(key) ?? 0;
+		if (!skipGapDetection && lastTs && candle.timestamp > lastTs + tfMs) {
+			const missing = Math.floor((candle.timestamp - lastTs) / tfMs) - 1;
+			runtimeLogger.warn("candle_gap_detected", {
+				venue: this.options.venue,
+				symbol: this.canonicalSymbol,
+				timeframe,
+				gapSize: missing,
+				lastTimestamp: lastTs,
+				currentTimestamp: candle.timestamp,
+			});
+			await this.repairGap(timeframe, lastTs + tfMs, candle.timestamp, tfMs);
+		}
+		if (!this.reserveTimestamp(key, candle.timestamp)) {
+			return;
+		}
+		try {
+			await this.emitEvent(timeframe, candle, receivedAt, source, gapFilled);
+			this.lastEmitted.set(key, candle.timestamp);
+			if (source === "ws") {
+				this.lastWsArrival.set(key, receivedAt);
+			}
+		} finally {
+			this.releaseTimestamp(key, candle.timestamp);
+		}
+	}
+
+	private reserveTimestamp(key: string, timestamp: number): boolean {
+		const lastTs = this.lastEmitted.get(key) ?? 0;
+		if (lastTs && timestamp <= lastTs) {
+			return false;
+		}
+		const pending = this.pendingEmissions.get(key) ?? new Set<number>();
+		if (pending.has(timestamp)) {
+			return false;
+		}
+		pending.add(timestamp);
+		this.pendingEmissions.set(key, pending);
+		return true;
+	}
+
+	private releaseTimestamp(key: string, timestamp: number): void {
+		const pending = this.pendingEmissions.get(key);
+		if (!pending) {
+			return;
+		}
+		pending.delete(timestamp);
+		if (!pending.size) {
+			this.pendingEmissions.delete(key);
+		}
 	}
 
 	private recordArrival(timeframe: string, delay: number): void {
@@ -395,29 +480,143 @@ class BinanceUsdMClosedCandleFeed implements MarketDataFeed {
 		if (!this.running) {
 			return;
 		}
+		const now = Date.now();
 		for (const timeframe of this.timeframes) {
-			const lastTs = this.lastProcessed.get(timeframe) ?? 0;
-			const tfMs = this.timeframeMs.get(timeframe) ?? 0;
-			if (!tfMs) {
-				continue;
-			}
-			const expectedNext = lastTs + tfMs;
-			if (lastTs && Date.now() < expectedNext + this.fallbackOffsetMs) {
-				continue;
-			}
-			try {
-				const candles = await this.options.fetchCandles(timeframe, 2);
-				const latest = candles[candles.length - 1];
-				if (!latest) {
-					continue;
-				}
-				await this.handleClosedCandle(timeframe, latest, Date.now(), "poll");
-			} catch (error) {
-				runtimeLogger.warn("binance_fallback_error", {
-					timeframe,
-					message: error instanceof Error ? error.message : String(error),
-				});
-			}
+			await this.detectAndRepairGap(timeframe, now);
 		}
+	}
+
+	private async detectAndRepairGap(
+		timeframe: string,
+		now: number
+	): Promise<void> {
+		const tfMs = this.timeframeMs.get(timeframe);
+		if (!tfMs) {
+			return;
+		}
+		const key = this.identityKey(timeframe);
+		const lastTs = this.lastEmitted.get(key);
+		const wsConnected = this.isWsConnected();
+		if (!lastTs) {
+			this.logPollRepairNoop(timeframe, "no_history", now, key, {
+				wsConnected,
+			});
+			return;
+		}
+		const expectedNext = lastTs + tfMs;
+		const graceMs = this.pollGraceMs(tfMs);
+		const beyondGrace = now > expectedNext + graceMs;
+		if (wsConnected && !beyondGrace) {
+			this.logPollRepairNoop(timeframe, "within_grace", now, key, {
+				expectedNext,
+				graceMs,
+			});
+			return;
+		}
+		if (wsConnected && this.isWsHealthy(key, now, tfMs)) {
+			this.logPollRepairNoop(timeframe, "ws_healthy", now, key, {
+				lastWsArrival: this.lastWsArrival.get(key) ?? null,
+			});
+			return;
+		}
+		const windowMs = Math.max(now - expectedNext, tfMs);
+		const maxCandles = Math.min(
+			MAX_REPAIR_CANDLES,
+			Math.max(1, Math.ceil(windowMs / tfMs))
+		);
+		try {
+			const candles = await this.options.fetchCandles(
+				timeframe,
+				maxCandles + GAP_FETCH_PADDING,
+				expectedNext
+			);
+			const missing = candles
+				.filter(
+					(candle) =>
+						candle.timestamp >= expectedNext && candle.timestamp > lastTs
+				)
+				.sort((a, b) => a.timestamp - b.timestamp)
+				.map((candle) => this.normalizeCandle(candle, timeframe));
+			if (!missing.length) {
+				this.logPollRepairNoop(timeframe, "no_data", now, key, {
+					expectedNext,
+				});
+				return;
+			}
+			for (const candle of missing) {
+				await this.processCandle(
+					timeframe,
+					candle,
+					Date.now(),
+					"poll",
+					true,
+					true
+				);
+			}
+			runtimeLogger.info("poll_repair_backfill", {
+				venue: this.options.venue,
+				symbol: this.canonicalSymbol,
+				timeframe,
+				candlesRepaired: missing.length,
+				fromTimestamp: missing[0]?.timestamp,
+				toTimestamp: missing[missing.length - 1]?.timestamp,
+			});
+		} catch (error) {
+			runtimeLogger.warn("poll_repair_error", {
+				venue: this.options.venue,
+				symbol: this.canonicalSymbol,
+				timeframe,
+				message: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+
+	private isWsHealthy(key: string, now: number, tfMs: number): boolean {
+		const lastArrival = this.lastWsArrival.get(key);
+		if (!lastArrival) {
+			return false;
+		}
+		const healthWindow = Math.max(tfMs * WS_HEALTH_FACTOR, MIN_WS_HEALTH_MS);
+		return now - lastArrival <= healthWindow;
+	}
+
+	private pollGraceMs(tfMs: number): number {
+		return Math.max(Math.floor(tfMs * POLL_GRACE_FACTOR), MIN_POLL_GRACE_MS);
+	}
+
+	private isWsConnected(): boolean {
+		return Boolean(this.ws && this.ws.readyState === WebSocket.OPEN);
+	}
+
+	private buildIdentityKey(timeframe: string): string {
+		return `${this.canonicalSymbol}:${timeframe.toLowerCase()}`;
+	}
+
+	private identityKey(timeframe: string): string {
+		let key = this.identityByTimeframe.get(timeframe);
+		if (!key) {
+			key = this.buildIdentityKey(timeframe);
+			this.identityByTimeframe.set(timeframe, key);
+		}
+		return key;
+	}
+
+	private logPollRepairNoop(
+		timeframe: string,
+		reason: string,
+		now: number,
+		key: string,
+		extra: Record<string, unknown> = {}
+	): void {
+		runtimeLogger.info("poll_repair_noop", {
+			venue: this.options.venue,
+			symbol: this.canonicalSymbol,
+			timeframe,
+			reason,
+			now,
+			lastTimestamp: this.lastEmitted.get(key) ?? null,
+			wsConnected: this.isWsConnected(),
+			...extra,
+		});
 	}
 }
