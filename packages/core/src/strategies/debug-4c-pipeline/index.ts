@@ -39,7 +39,10 @@ export class Debug4cPipelineStrategy {
 
 		const latest = candles[candles.length - 1] as Candle;
 		const intent = this.sequencer.nextIntent(latest, position);
-		this.metrics.emitEvent({ intent: intent.intent, timestamp: latest.timestamp });
+		this.metrics.emitEvent({
+			intent: intent.intent,
+			timestamp: latest.timestamp,
+		});
 		return intent;
 	}
 
@@ -80,10 +83,8 @@ export const debug4cPipelineModule = {
 	id: DEBUG_4C_PIPELINE_ID,
 	manifest: debug4cPipelineManifest,
 	defaultProfile: "debug-4c-pipeline",
-	createStrategy: (
-		config: Debug4cPipelineConfig,
-		deps: Debug4cPipelineDeps
-	) => new Debug4cPipelineStrategy(config, deps),
+	createStrategy: (config: Debug4cPipelineConfig, deps: Debug4cPipelineDeps) =>
+		new Debug4cPipelineStrategy(config, deps),
 	loadConfig: loadDebug4cPipelineConfig,
 	dependencies: {
 		createCache: createDebug4cPipelineCache,
