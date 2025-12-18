@@ -101,6 +101,7 @@ export interface SetupDecision {
 	tp1: number | null;
 	tp2: number | null;
 	confidence: number;
+	riskPerTradePct?: number;
 }
 
 const DEFAULT_PLAYTYPE_PRIORITY: UltraAggressivePlayType[] = [
@@ -665,19 +666,48 @@ const evaluateSetups = (
 	return { setups, diagnostics: diagEntries };
 };
 
+/**
+ * Dynamic risk scaling: Use max risk (3%) for A+ setups, base risk (2.5%) otherwise
+ * A+ = liquiditySweep with confidence >= 30%
+ */
+const getDynamicRiskPct = (
+	reason: string,
+	confidence: number,
+	risk: UltraAggressiveRiskConfig
+): number => {
+	const maxRisk = risk.maxRiskPerTradePct ?? risk.riskPerTradePct;
+	const baseRisk = risk.riskPerTradePct;
+	
+	// Liquidity sweep with high confidence gets max risk
+	if (reason.includes("liquidity_sweep") && confidence >= 0.30) {
+		return maxRisk;
+	}
+	
+	// Breakout with very high confidence gets max risk
+	if (reason.includes("trend_ignition") && confidence >= 0.35) {
+		return maxRisk;
+	}
+	
+	// All other setups use base risk
+	return baseRisk;
+};
+
 const buildSetupDecision = (
 	ctx: StrategyContextSnapshot,
 	intent: SetupDecision["intent"],
 	reason: string,
 	risk: UltraAggressiveRiskConfig
 ): SetupDecision => {
+	const confidence = computeConfidenceScore(ctx, intent, reason);
+	const dynamicRiskPct = getDynamicRiskPct(reason, confidence, risk);
+	
 	const sideMultiplier = intent === "OPEN_LONG" ? 1 : -1;
 	const stopDistance =
 		(ctx.indicator.atr1m ?? ctx.price * 0.002) * risk.atrStopMultiple;
 	const stop = ctx.price - sideMultiplier * stopDistance;
 	const tp1 = ctx.price + sideMultiplier * stopDistance * risk.partialTpRR;
 	const tp2 = ctx.price + sideMultiplier * stopDistance * risk.finalTpRR;
-	const confidence = computeConfidenceScore(ctx, intent, reason);
+	
 	return {
 		intent,
 		reason,
@@ -685,6 +715,7 @@ const buildSetupDecision = (
 		tp1,
 		tp2,
 		confidence,
+		riskPerTradePct: dynamicRiskPct,
 	};
 };
 

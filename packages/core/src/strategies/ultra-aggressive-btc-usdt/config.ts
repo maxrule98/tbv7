@@ -44,6 +44,7 @@ export interface UltraAggressiveEquityThrottleConfig {
 
 export interface UltraAggressiveRiskConfig {
 	riskPerTradePct: number;
+	maxRiskPerTradePct?: number;
 	atrStopMultiple: number;
 	partialTpRR: number;
 	finalTpRR: number;

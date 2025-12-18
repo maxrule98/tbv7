@@ -16,8 +16,8 @@
 	},
 	"playTypePriority": [
 		"liquiditySweep",
-		"breakoutTrap",
 		"breakout",
+		"breakoutTrap",
 		"meanReversion"
 	],
 	"cacheTTLms": 1500,
@@ -35,40 +35,41 @@
 		"cvd": 40
 	},
 	"thresholds": {
-		"vwapStretchPct": 0.001,
-		"breakoutVolumeMultiple": 1.03,
-		"breakoutAtrMultiple": 0.15,
-		"meanRevStretchAtr": 0.55,
-		"liquiditySweepWickMultiple": 0.5,
-		"trapVolumeMaxMultiple": 1.6,
-		"cvdDivergenceThreshold": 1.2,
-		"rsiOverbought": 60,
-		"rsiOversold": 40
+		"vwapStretchPct": 0.0008,
+		"breakoutVolumeMultiple": 1.15,
+		"breakoutAtrMultiple": 0.18,
+		"meanRevStretchAtr": 0.65,
+		"liquiditySweepWickMultiple": 0.6,
+		"trapVolumeMaxMultiple": 1.4,
+		"cvdDivergenceThreshold": 1.5,
+		"rsiOverbought": 68,
+		"rsiOversold": 32
 	},
 	"risk": {
-		"riskPerTradePct": 0.03,
-		"atrStopMultiple": 1.1,
-		"partialTpRR": 0.55,
-		"finalTpRR": 1.8,
-		"trailingAtrMultiple": 0.8
+		"riskPerTradePct": 0.025,
+		"maxRiskPerTradePct": 0.03,
+		"atrStopMultiple": 1.0,
+		"partialTpRR": 1.0,
+		"finalTpRR": 2.5,
+		"trailingAtrMultiple": 0.6
 	},
 	"qualityFilters": {
-		"minConfidence": 0.15,
+		"minConfidence": 0.22,
 		"playTypeMinConfidence": {
-			"liquiditySweep": 0.18,
-			"breakoutTrap": 0.2,
+			"liquiditySweep": 0.25,
+			"breakoutTrap": 0.28,
 			"breakout": 0.22,
-			"meanReversion": 0.16
+			"meanReversion": 0.24
 		},
-		"requireCvdAlignment": false,
+		"requireCvdAlignment": true,
 		"requireStrongLongCvd": false,
-		"allowShortsAgainstCvd": true,
+		"allowShortsAgainstCvd": false,
 		"minLongTrendSlopePct": 0,
 		"minShortTrendSlopePct": 0,
-		"requireLongDiscountToVwapPct": 0,
-		"requireShortPremiumToVwapPct": 0,
-		"maxTrendSlopePctForCounterTrend": 0.015,
-		"maxVolatilityForMeanReversion": "high"
+		"requireLongDiscountToVwapPct": 0.0005,
+		"requireShortPremiumToVwapPct": 0.0005,
+		"maxTrendSlopePctForCounterTrend": 0.008,
+		"maxVolatilityForMeanReversion": "balanced"
 	},
 	"sessionFilters": {
 		"enabled": false,
@@ -80,11 +81,11 @@
 		"lookbackTrades": 8,
 		"maxDrawdownPct": 0.008
 	},
-	"maxTradeDurationMinutes": 45,
-	"enableVolatilityFadeExit": false,
+	"maxTradeDurationMinutes": 30,
+	"enableVolatilityFadeExit": true,
 	"allowBreakoutsWhenRSIOverbought": true,
 	"reversionNeedsTwoOfThreeConditions": false,
-	"maxDrawdownPerTradePct": 0.03,
-	"cooldownAfterStopoutBars": 2,
+	"maxDrawdownPerTradePct": 0.025,
+	"cooldownAfterStopoutBars": 3,
 	"dailyDrawdownLimitPct": 0.12
 }

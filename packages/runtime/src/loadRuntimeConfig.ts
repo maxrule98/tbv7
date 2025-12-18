@@ -20,6 +20,7 @@ import {
 	resolveStrategySelection,
 	withConfigMetadata,
 } from "@agenai/core";
+import { timeframeToMs } from "@agenai/data";
 
 export interface RuntimeProfileMetadata {
 	account?: string;
@@ -205,9 +206,11 @@ export const loadRuntimeConfig = (
 	}
 
 	const runtimeParams = assertStrategyRuntimeParams(strategyConfig);
+	const trackedTimeframes = extractTrackedTimeframes(strategyConfig);
 	const venues = resolveVenueSelection({
 		env: agenaiConfig.env,
 		runtimeParams,
+		trackedTimeframes,
 		overrides: {
 			signalVenue: options.signalVenue,
 			executionVenue: options.executionVenue,
@@ -264,6 +267,7 @@ export const loadRuntimeConfig = (
 interface VenueResolutionOptions {
 	env: EnvConfig;
 	runtimeParams: StrategyRuntimeParams;
+	trackedTimeframes: string[];
 	overrides?: {
 		signalVenue?: string;
 		executionVenue?: string;
@@ -280,6 +284,26 @@ const normalizeVenue = (
 		return fallback;
 	}
 	return value.trim().toLowerCase();
+};
+const extractTrackedTimeframes = (strategyConfig: StrategyConfig): string[] => {
+	const frames = new Set<string>();
+	const addFrame = (value?: string): void => {
+		if (typeof value === "string" && value.trim().length > 0) {
+			frames.add(value.trim());
+		}
+	};
+	const configTimeframes = (
+		strategyConfig as { timeframes?: Record<string, string> }
+	).timeframes;
+	if (configTimeframes) {
+		Object.values(configTimeframes).forEach(addFrame);
+	}
+	const trackedTimeframes = (strategyConfig as { trackedTimeframes?: unknown })
+		.trackedTimeframes;
+	if (Array.isArray(trackedTimeframes)) {
+		trackedTimeframes.forEach(addFrame);
+	}
+	return Array.from(frames);
 };
 
 const normalizeTimeframes = (
@@ -303,6 +327,35 @@ const normalizeTimeframes = (
 	return unique;
 };
 
+const mergeAndSortTimeframes = (
+	requested: string[],
+	trackedTimeframes: string[],
+	executionTimeframe: string
+): string[] => {
+	const merged = new Set<string>();
+	for (const tf of requested) {
+		if (tf && tf.trim().length > 0) {
+			merged.add(tf.trim());
+		}
+	}
+	for (const tf of trackedTimeframes) {
+		if (tf && tf.trim().length > 0) {
+			merged.add(tf.trim());
+		}
+	}
+	if (executionTimeframe && executionTimeframe.trim().length > 0) {
+		merged.add(executionTimeframe.trim());
+	}
+	const sorted = Array.from(merged).sort((a, b) => {
+		try {
+			return timeframeToMs(a) - timeframeToMs(b);
+		} catch {
+			return a.localeCompare(b);
+		}
+	});
+	return sorted;
+};
+
 const resolveVenueSelection = (
 	options: VenueResolutionOptions
 ): VenueSelection => {
@@ -319,9 +372,14 @@ const resolveVenueSelection = (
 		options.overrides?.executionVenue ?? options.env.executionVenue,
 		defaultExecutionVenue
 	);
-	const signalTimeframes = normalizeTimeframes(
+	const requestedTimeframes = normalizeTimeframes(
 		options.overrides?.signalTimeframes,
 		options.env.signalTimeframes,
+		options.runtimeParams.executionTimeframe
+	);
+	const signalTimeframes = mergeAndSortTimeframes(
+		requestedTimeframes,
+		options.trackedTimeframes,
 		options.runtimeParams.executionTimeframe
 	);
 	const executionTimeframe =
