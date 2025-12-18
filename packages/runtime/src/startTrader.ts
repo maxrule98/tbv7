@@ -6,13 +6,7 @@ import {
 	RiskConfig,
 	StrategyId,
 } from "@agenai/core";
-import {
-	DefaultDataProvider,
-	timeframeToMs,
-	type DataProvider,
-} from "@agenai/data";
 import { MexcClient } from "@agenai/exchange-mexc";
-import { ExecutionEngine, PaperAccount } from "@agenai/execution-engine";
 import { RiskManager } from "@agenai/risk-engine";
 import { resolveStrategyBuilder } from "./strategyBuilders";
 import {
@@ -40,8 +34,8 @@ import {
 	withRuntimeFingerprints,
 } from "./runtimeShared";
 import type { StrategyRuntimeBuilder } from "./runtimeFactory";
-import type { TraderStrategy } from "./types";
-import type { LoadedRuntimeConfig } from "./loadRuntimeConfig";
+import type { StrategyDecisionContext, TraderStrategy } from "./types";
+import type { LoadedRuntimeConfig, VenueSelection } from "./loadRuntimeConfig";
 import {
 	createRuntimeSnapshot,
 	createRuntime,
@@ -49,11 +43,21 @@ import {
 } from "./runtimeSnapshot";
 import { buildRuntimeFingerprintLogPayload } from "./runtimeFingerprint";
 import type { StrategyRuntimeFingerprints } from "./fingerprints";
+import {
+	BinanceUsdMMarketDataProvider,
+	PollingMarketDataProvider,
+	type ClosedCandleEvent,
+	type MarketDataProvider,
+} from "./marketData";
+import {
+	MexcExecutionProvider,
+	type ExecutionProvider,
+} from "./execution/executionProvider";
 export type { TraderStrategy } from "./types";
 
 export const DEFAULT_POLL_INTERVAL_MS = 10_000;
 const BOOTSTRAP_CANDLE_LIMIT = 300;
-const FIFTEEN_MIN_MS = 15 * 60 * 1000;
+const FIFTEEN_MIN_MS = 15 * 60 * 1_000;
 
 export interface TraderConfig {
 	symbol?: string;
@@ -77,7 +81,8 @@ export interface StartTraderOptions {
 	riskProfile?: string;
 	strategyOverride?: TraderStrategy;
 	strategyBuilder?: StrategyRuntimeBuilder;
-	dataProvider?: DataProvider;
+	marketDataProvider?: MarketDataProvider;
+	executionProvider?: ExecutionProvider;
 }
 
 export const startTrader = async (
@@ -106,14 +111,25 @@ export const startTrader = async (
 	const runtimeBootstrap = runtimeSnapshot.config;
 	const agenaiConfig = runtimeBootstrap.agenaiConfig;
 	const accountConfig = runtimeBootstrap.accountConfig;
-	const executionMode =
+	const executionMode: ExecutionMode =
 		traderConfig.executionMode ?? agenaiConfig.env.executionMode ?? "paper";
+	const runtimeMode: StrategyRuntimeMode =
+		executionMode === "live" ? "live" : "paper";
 	const resolvedStrategyId = runtimeBootstrap.strategyId;
 	const runtimeMetadata = runtimeSnapshot.metadata;
+	const venues = runtimeBootstrap.venues;
+	const executionTimeframe =
+		venues.executionTimeframe ??
+		runtimeMetadata.runtimeParams.executionTimeframe;
 	const instrument = {
 		symbol: runtimeMetadata.runtimeParams.symbol,
-		timeframe: runtimeMetadata.runtimeParams.executionTimeframe,
+		timeframe: executionTimeframe,
 	};
+	const signalTimeframes = venues.signalTimeframes.length
+		? venues.signalTimeframes
+		: [executionTimeframe];
+	const pollIntervalMs =
+		traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 	const profileMetadata = runtimeBootstrap.profiles;
 
 	const client = new MexcClient({
@@ -122,12 +138,24 @@ export const startTrader = async (
 		useFutures: true,
 	});
 
-	const dataProvider =
-		options.dataProvider ?? new DefaultDataProvider({ client });
+	const marketDataProvider =
+		options.marketDataProvider ??
+		createMarketDataProvider(venues.signalVenue, client, pollIntervalMs);
+	const executionProvider =
+		options.executionProvider ??
+		new MexcExecutionProvider({
+			client,
+			mode: executionMode,
+			accountConfig,
+		});
 
 	const effectiveBuilder =
 		options.strategyBuilder ??
-		resolveStrategyBuilder(resolvedStrategyId, client);
+		resolveStrategyBuilder(
+			resolvedStrategyId,
+			(symbolArg, timeframeArg, limit) =>
+				marketDataProvider.fetchCandles(symbolArg, timeframeArg, limit)
+		);
 
 	const runtime = await createRuntime(runtimeSnapshot, {
 		strategyOverride: options.strategyOverride,
@@ -142,7 +170,7 @@ export const startTrader = async (
 		runtimeContextFingerprint: runtimeSnapshot.runtimeContextFingerprint,
 	};
 	logStrategyRuntimeMetadata({
-		mode: executionMode,
+		mode: runtimeMode,
 		strategyId: resolvedStrategyId,
 		strategyConfig: agenaiConfig.strategy,
 		fingerprints: runtimeFingerprints,
@@ -153,33 +181,41 @@ export const startTrader = async (
 		extra: {
 			symbol: instrument.symbol,
 			timeframe: instrument.timeframe,
-			pollIntervalMs: traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+			pollIntervalMs,
+			signalVenue: venues.signalVenue,
+			executionVenue: venues.executionVenue,
+			signalTimeframes,
+			executionTimeframe,
 		},
 	});
 	runtimeLogger.info("runtime_fingerprints", {
-		mode: executionMode,
+		mode: runtimeMode,
 		strategyId: resolvedStrategyId,
 		...buildRuntimeFingerprintLogPayload(runtimeSnapshot),
 	});
+
 	const riskManager = new RiskManager(agenaiConfig.risk);
-	const paperAccount =
-		executionMode === "paper"
-			? new PaperAccount(accountConfig.startingBalance)
-			: undefined;
-	const executionEngine = new ExecutionEngine({
-		client,
-		mode: executionMode,
-		paperAccount,
+	const initialSnapshot = executionProvider.snapshotAccount(0);
+	const initialEquity =
+		initialSnapshot?.equity ?? accountConfig.startingBalance ?? 100;
+
+	runtimeLogger.info("venue_wiring_selected", {
+		signalVenue: venues.signalVenue,
+		executionVenue: venues.executionVenue,
+		signalTimeframes,
+		executionTimeframe,
+		marketDataProvider: marketDataProvider.venue,
+		executionProvider: executionProvider.venue,
 	});
-	const initialEquity = paperAccount
-		? paperAccount.snapshot(0).equity
-		: accountConfig.startingBalance || 100;
 
 	runtimeLogger.info("trader_config", {
 		symbol: instrument.symbol,
 		timeframe: instrument.timeframe,
 		useTestnet: traderConfig.useTestnet,
 		executionMode,
+		signalVenue: venues.signalVenue,
+		executionVenue: venues.executionVenue,
+		signalTimeframes,
 		strategyId: resolvedStrategyId,
 	});
 	logStrategyLoaded({
@@ -197,264 +233,189 @@ export const startTrader = async (
 		executionMode,
 		builderName: runtime.builderName,
 		profiles: profileMetadata,
-		pollIntervalMs: traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+		pollIntervalMs,
 	});
 	logRiskConfig(agenaiConfig.risk);
 
-	const candlesBySymbol = new Map<string, Candle[]>();
-	const lastTimestampBySymbol = new Map<string, number>();
+	const bootstrapState = await bootstrapMarketData({
+		provider: marketDataProvider,
+		symbol: instrument.symbol,
+		timeframes: signalTimeframes,
+		limit: BOOTSTRAP_CANDLE_LIMIT,
+		mode: runtimeMode,
+	});
 
-	const bootstrapWindow = await bootstrapCandles(
-		dataProvider,
-		instrument.symbol,
-		instrument.timeframe,
-		candlesBySymbol,
-		lastTimestampBySymbol
-	);
-	if (bootstrapWindow.length) {
-		logTimeframeFingerprint({
-			mode: executionMode,
-			label: "live_bootstrap",
-			symbol: instrument.symbol,
-			timeframe: instrument.timeframe,
-			candles: bootstrapWindow,
-		});
-	}
-
-	return startPolling(
-		dataProvider,
+	return startClosedCandleRuntime({
+		provider: marketDataProvider,
 		strategy,
 		riskManager,
-		agenaiConfig.risk,
-		executionEngine,
+		riskConfig: agenaiConfig.risk,
+		executionProvider,
 		initialEquity,
-		instrument.symbol,
-		instrument.timeframe,
-		candlesBySymbol,
-		lastTimestampBySymbol,
-		traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
-		executionMode,
-		runtimeFingerprints
-	);
+		instrument,
+		signalTimeframes,
+		executionTimeframe,
+		pollIntervalMs,
+		bootstrap: bootstrapState,
+		mode: runtimeMode,
+		fingerprints: runtimeFingerprints,
+		venues,
+	});
 };
 
-const bootstrapCandles = async (
-	dataProvider: DataProvider,
-	symbol: string,
-	timeframe: string,
-	candlesBySymbol: Map<string, Candle[]>,
-	lastTimestampBySymbol: Map<string, number>
-): Promise<Candle[]> => {
-	const now = Date.now();
-	const windowMs = timeframeToMs(timeframe) * (BOOTSTRAP_CANDLE_LIMIT + 5);
-	const startTimestamp = Math.max(0, now - windowMs);
+interface BootstrapState {
+	candlesByTimeframe: Map<string, Candle[]>;
+	lastTimestampByTimeframe: Map<string, number>;
+}
+
+interface BootstrapOptions {
+	provider: MarketDataProvider;
+	symbol: string;
+	timeframes: string[];
+	limit: number;
+	mode: StrategyRuntimeMode;
+}
+
+const bootstrapMarketData = async (
+	options: BootstrapOptions
+): Promise<BootstrapState> => {
 	try {
-		const [series] = await dataProvider.loadHistoricalSeries({
-			symbol,
-			startTimestamp,
-			endTimestamp: now,
-			requests: [
-				{
+		const result = await options.provider.bootstrap({
+			symbol: options.symbol,
+			timeframes: options.timeframes,
+			limit: options.limit,
+		});
+		const candlesByTimeframe = new Map<string, Candle[]>();
+		const lastTimestampByTimeframe = new Map<string, number>();
+		for (const timeframe of options.timeframes) {
+			const source = result.candlesByTimeframe.get(timeframe) ?? [];
+			const trimmed =
+				source.length <= options.limit
+					? [...source]
+					: source.slice(source.length - options.limit);
+			candlesByTimeframe.set(timeframe, trimmed);
+			if (trimmed.length) {
+				const latest = trimmed[trimmed.length - 1]?.timestamp ?? 0;
+				lastTimestampByTimeframe.set(timeframe, latest);
+				logTimeframeFingerprint({
+					mode: options.mode,
+					label: "live_bootstrap",
+					symbol: options.symbol,
 					timeframe,
-					limit: BOOTSTRAP_CANDLE_LIMIT,
-				},
-			],
-		});
-
-		const candles = series?.candles ?? [];
-		if (!candles.length) {
-			runtimeLogger.warn("bootstrap_no_candles", { symbol, timeframe });
-			return [];
+					candles: trimmed,
+				});
+			} else {
+				runtimeLogger.warn("bootstrap_missing_candles", {
+					symbol: options.symbol,
+					timeframe,
+					venue: options.provider.venue,
+				});
+			}
 		}
-
-		const trimmed =
-			candles.length <= BOOTSTRAP_CANDLE_LIMIT
-				? candles
-				: candles.slice(candles.length - BOOTSTRAP_CANDLE_LIMIT);
-
-		candlesBySymbol.set(symbol, trimmed);
-		lastTimestampBySymbol.set(
-			symbol,
-			trimmed[trimmed.length - 1]?.timestamp ?? 0
-		);
-		runtimeLogger.info("bootstrap_candles_loaded", {
-			symbol,
-			timeframe,
-			count: trimmed.length,
+		runtimeLogger.info("market_data_bootstrap_complete", {
+			symbol: options.symbol,
+			timeframes: options.timeframes,
+			venue: options.provider.venue,
 		});
-		return trimmed;
+		return { candlesByTimeframe, lastTimestampByTimeframe };
 	} catch (error) {
 		logMarketDataError(error);
-		return [];
+		return {
+			candlesByTimeframe: new Map(),
+			lastTimestampByTimeframe: new Map(),
+		};
 	}
 };
 
-const startPolling = async (
-	dataProvider: DataProvider,
-	strategy: TraderStrategy,
-	riskManager: RiskManager,
-	riskConfig: RiskConfig,
-	executionEngine: ExecutionEngine,
-	defaultEquity: number,
-	symbol: string,
-	timeframe: string,
-	candlesBySymbol: Map<string, Candle[]>,
-	lastTimestampBySymbol: Map<string, number>,
-	pollIntervalMs: number,
-	runtimeMode: StrategyRuntimeMode,
-	fingerprints: StrategyRuntimeFingerprints
+interface ClosedCandleRuntimeOptions {
+	provider: MarketDataProvider;
+	strategy: TraderStrategy;
+	riskManager: RiskManager;
+	riskConfig: RiskConfig;
+	executionProvider: ExecutionProvider;
+	initialEquity: number;
+	instrument: { symbol: string; timeframe: string };
+	signalTimeframes: string[];
+	executionTimeframe: string;
+	pollIntervalMs: number;
+	bootstrap: BootstrapState;
+	mode: StrategyRuntimeMode;
+	fingerprints: StrategyRuntimeFingerprints;
+	venues: VenueSelection;
+}
+
+const startClosedCandleRuntime = async (
+	options: ClosedCandleRuntimeOptions
 ): Promise<never> => {
-	let fallbackEquity = defaultEquity;
-	const subscription = dataProvider.createLiveSubscription({
-		symbol,
-		timeframes: [timeframe],
-		pollIntervalMs,
-		bufferSize: 500,
+	const candlesByTimeframe = new Map(options.bootstrap.candlesByTimeframe);
+	for (const timeframe of options.signalTimeframes) {
+		if (!candlesByTimeframe.has(timeframe)) {
+			candlesByTimeframe.set(timeframe, []);
+		}
+	}
+	const lastTimestampByTimeframe = new Map(
+		options.bootstrap.lastTimestampByTimeframe
+	);
+	const lastFingerprintByTimeframe = new Map<string, number>();
+	let fallbackEquity = options.initialEquity;
+
+	const feed = options.provider.createFeed({
+		symbol: options.instrument.symbol,
+		timeframes: options.signalTimeframes,
+		executionTimeframe: options.executionTimeframe,
+		pollIntervalMs: options.pollIntervalMs,
 	});
 
 	let queue = Promise.resolve();
-	let lastFingerprintLogged = 0;
 
-	const processCandle = async (latest: Candle): Promise<void> => {
-		const lastTimestamp = lastTimestampBySymbol.get(symbol);
-		if (lastTimestamp === latest.timestamp) {
-			runtimeLogger.debug("poll_no_update", {
-				symbol,
-				timeframe,
-				lastTimestamp,
+	const handleEvent = async (event: ClosedCandleEvent): Promise<void> => {
+		const lastTs = lastTimestampByTimeframe.get(event.timeframe) ?? 0;
+		if (lastTs && event.candle.timestamp <= lastTs) {
+			runtimeLogger.debug("candle_duplicate_skipped", {
+				timeframe: event.timeframe,
+				symbol: event.symbol,
+				lastTimestamp: lastTs,
 			});
 			return;
 		}
 
-		lastTimestampBySymbol.set(symbol, latest.timestamp);
-		const buffer = appendCandle(candlesBySymbol, latest);
-		logCandle(latest);
-		if (latest.timestamp - lastFingerprintLogged >= FIFTEEN_MIN_MS) {
-			logTimeframeFingerprint({
-				mode: runtimeMode,
-				label: "live_window",
-				symbol,
-				timeframe,
-				candles: buffer,
-				windowMs: FIFTEEN_MIN_MS,
+		lastTimestampByTimeframe.set(event.timeframe, event.candle.timestamp);
+		const buffer = appendCandle(
+			candlesByTimeframe,
+			event.timeframe,
+			event.candle
+		);
+		logClosedCandleEvent(event);
+
+		if (event.timeframe === options.executionTimeframe) {
+			maybeLogFingerprint({
+				timeframe: event.timeframe,
+				buffer,
+				mode: options.mode,
+				symbol: options.instrument.symbol,
+				latestTimestamp: event.candle.timestamp,
+				lastLoggedByTimeframe: lastFingerprintByTimeframe,
 			});
-			lastFingerprintLogged = latest.timestamp;
-		}
-
-		const positionState = executionEngine.getPosition(symbol);
-		const unrealizedPnl = calculateUnrealizedPnl(positionState, latest.close);
-		const prePlanSnapshot = executionEngine.snapshotPaperAccount(unrealizedPnl);
-		const accountEquity = prePlanSnapshot?.equity ?? fallbackEquity;
-
-		const forcedExitHandled = await maybeHandleForcedExit(
-			positionState,
-			latest,
-			riskManager,
-			executionEngine,
-			accountEquity,
-			undefined,
-			fingerprints
-		);
-		if (forcedExitHandled) {
-			const accountSnapshot = logAndSnapshotPosition(
-				executionEngine,
-				symbol,
-				latest.close,
-				latest.timestamp
-			);
-			if (accountSnapshot) {
-				fallbackEquity = accountSnapshot.equity;
-			}
-			return;
-		}
-
-		const trailingExitHandled = await maybeHandleTrailingStop(
-			symbol,
-			positionState,
-			latest,
-			riskManager,
-			executionEngine,
-			accountEquity,
-			riskConfig,
-			undefined,
-			fingerprints
-		);
-		if (trailingExitHandled) {
-			const accountSnapshot = logAndSnapshotPosition(
-				executionEngine,
-				symbol,
-				latest.close,
-				latest.timestamp
-			);
-			if (accountSnapshot) {
-				fallbackEquity = accountSnapshot.equity;
-			}
-			return;
-		}
-
-		const intent = enrichIntentMetadata(
-			await strategy.decide(buffer, positionState.side)
-		);
-		const fingerprintedIntent = withRuntimeFingerprints(intent, fingerprints);
-		logStrategyDecision(latest, fingerprintedIntent, fingerprints);
-
-		const plan = riskManager.plan(
-			fingerprintedIntent,
-			latest.close,
-			accountEquity,
-			positionState
-		);
-		if (!plan) {
-			if (fingerprintedIntent.intent !== "NO_ACTION") {
-				const reason =
-					fingerprintedIntent.intent === "CLOSE_LONG" ||
-					fingerprintedIntent.intent === "CLOSE_SHORT"
-						? "no_position_to_close"
-						: "risk_plan_rejected";
-				logExecutionSkipped(fingerprintedIntent, positionState.side, reason);
-			}
-		} else {
-			const skipReason = getPreExecutionSkipReason(plan, positionState);
-			if (skipReason) {
-				logExecutionSkipped(plan, positionState.side, skipReason);
-			} else {
-				logTradePlan(plan, latest, fingerprintedIntent);
-				try {
-					const result = await executionEngine.execute(plan, {
-						price: latest.close,
-					});
-					if (result.status === "skipped") {
-						logExecutionSkipped(
-							plan,
-							positionState.side,
-							result.reason ?? "execution_engine_skip"
-						);
-					} else {
-						logExecutionResult(result);
-					}
-				} catch (error) {
-					logExecutionError(error, plan);
-				}
-			}
-		}
-
-		const latestPosition = executionEngine.getPosition(symbol);
-		logPaperPosition(symbol, latestPosition);
-
-		const accountSnapshot = snapshotPaperAccount(
-			executionEngine,
-			calculateUnrealizedPnl(latestPosition, latest.close),
-			symbol,
-			latest.timestamp
-		);
-		if (accountSnapshot) {
-			fallbackEquity = accountSnapshot.equity;
+			fallbackEquity = await processExecutionCandle({
+				candle: event.candle,
+				buffer,
+				strategy: options.strategy,
+				riskManager: options.riskManager,
+				riskConfig: options.riskConfig,
+				executionProvider: options.executionProvider,
+				symbol: options.instrument.symbol,
+				accountEquityFallback: fallbackEquity,
+				mode: options.mode,
+				fingerprints: options.fingerprints,
+				venues: options.venues,
+				event,
+			});
 		}
 	};
 
-	subscription.onCandle((candle) => {
+	feed.onCandle((event) => {
 		queue = queue
-			.then(() => processCandle(candle))
+			.then(() => handleEvent(event))
 			.catch((error) => {
 				runtimeLogger.error("live_candle_processing_error", {
 					error: error instanceof Error ? error.message : String(error),
@@ -463,35 +424,238 @@ const startPolling = async (
 		return queue;
 	});
 
-	subscription.start();
+	feed.start();
 	return new Promise<never>(() => {
 		// Keeps the process alive; shutdown handled externally.
 	});
 };
 
-const appendCandle = (
-	candlesBySymbol: Map<string, Candle[]>,
-	candle: Candle
-): Candle[] => {
-	const buffer = candlesBySymbol.get(candle.symbol) ?? [];
-	buffer.push(candle);
-	if (buffer.length > 500) {
-		buffer.splice(0, buffer.length - 500);
+interface FingerprintLogContext {
+	timeframe: string;
+	buffer: Candle[];
+	mode: StrategyRuntimeMode;
+	symbol: string;
+	latestTimestamp: number;
+	lastLoggedByTimeframe: Map<string, number>;
+}
+
+const maybeLogFingerprint = (context: FingerprintLogContext): void => {
+	if (!context.buffer.length) {
+		return;
 	}
-	candlesBySymbol.set(candle.symbol, buffer);
+	const lastLogged = context.lastLoggedByTimeframe.get(context.timeframe) ?? 0;
+	if (context.latestTimestamp - lastLogged < FIFTEEN_MIN_MS) {
+		return;
+	}
+	logTimeframeFingerprint({
+		mode: context.mode,
+		label: "live_window",
+		symbol: context.symbol,
+		timeframe: context.timeframe,
+		candles: context.buffer,
+		windowMs: FIFTEEN_MIN_MS,
+	});
+	context.lastLoggedByTimeframe.set(context.timeframe, context.latestTimestamp);
+};
+
+const appendCandle = (
+	candlesByTimeframe: Map<string, Candle[]>,
+	timeframe: string,
+	candle: Candle,
+	limit = 600
+): Candle[] => {
+	const buffer = candlesByTimeframe.get(timeframe) ?? [];
+	buffer.push(candle);
+	if (buffer.length > limit) {
+		buffer.splice(0, buffer.length - limit);
+	}
+	candlesByTimeframe.set(timeframe, buffer);
 	return buffer;
 };
 
-const logCandle = (candle: Candle): void => {
-	const payload = {
-		symbol: candle.symbol,
-		timeframe: candle.timeframe,
-		timestamp: new Date(candle.timestamp).toISOString(),
-		open: candle.open,
-		high: candle.high,
-		low: candle.low,
-		close: candle.close,
-		volume: candle.volume,
-	};
-	runtimeLogger.debug("latest_candle", payload);
+const logClosedCandleEvent = (event: ClosedCandleEvent): void => {
+	runtimeLogger.debug("closed_candle_event", {
+		venue: event.venue,
+		symbol: event.symbol,
+		timeframe: event.timeframe,
+		timestamp: new Date(event.candle.timestamp).toISOString(),
+		close: event.candle.close,
+		gapFilled: event.gapFilled ?? false,
+		source: event.source,
+		arrivalDelayMs: event.arrivalDelayMs,
+	});
+};
+
+interface ExecutionCandleContext {
+	candle: Candle;
+	buffer: Candle[];
+	strategy: TraderStrategy;
+	riskManager: RiskManager;
+	riskConfig: RiskConfig;
+	executionProvider: ExecutionProvider;
+	symbol: string;
+	accountEquityFallback: number;
+	mode: StrategyRuntimeMode;
+	fingerprints: StrategyRuntimeFingerprints;
+	venues: VenueSelection;
+	event: ClosedCandleEvent;
+}
+
+const processExecutionCandle = async (
+	context: ExecutionCandleContext
+): Promise<number> => {
+	let fallbackEquity = context.accountEquityFallback;
+	const positionState = context.executionProvider.getPosition(context.symbol);
+	const unrealizedPnl = calculateUnrealizedPnl(
+		positionState,
+		context.candle.close
+	);
+	const prePlanSnapshot =
+		context.executionProvider.snapshotAccount(unrealizedPnl);
+	const accountEquity = prePlanSnapshot?.equity ?? fallbackEquity;
+
+	const forcedExitHandled = await maybeHandleForcedExit(
+		positionState,
+		context.candle,
+		context.riskManager,
+		context.executionProvider,
+		accountEquity,
+		undefined,
+		context.fingerprints
+	);
+	if (forcedExitHandled) {
+		const accountSnapshot = logAndSnapshotPosition(
+			context.executionProvider,
+			context.symbol,
+			context.candle.close,
+			context.candle.timestamp
+		);
+		if (accountSnapshot) {
+			fallbackEquity = accountSnapshot.equity;
+		}
+		return fallbackEquity;
+	}
+
+	const trailingExitHandled = await maybeHandleTrailingStop(
+		context.symbol,
+		positionState,
+		context.candle,
+		context.riskManager,
+		context.executionProvider,
+		accountEquity,
+		context.riskConfig,
+		undefined,
+		context.fingerprints
+	);
+	if (trailingExitHandled) {
+		const accountSnapshot = logAndSnapshotPosition(
+			context.executionProvider,
+			context.symbol,
+			context.candle.close,
+			context.candle.timestamp
+		);
+		if (accountSnapshot) {
+			fallbackEquity = accountSnapshot.equity;
+		}
+		return fallbackEquity;
+	}
+
+	const decisionContext = createDecisionContext(context.event, context.venues);
+	const intent = enrichIntentMetadata(
+		await context.strategy.decide(
+			context.buffer,
+			positionState.side,
+			decisionContext
+		)
+	);
+	const fingerprintedIntent = withRuntimeFingerprints(
+		intent,
+		context.fingerprints
+	);
+	logStrategyDecision(
+		context.candle,
+		fingerprintedIntent,
+		context.fingerprints
+	);
+
+	const plan = context.riskManager.plan(
+		fingerprintedIntent,
+		context.candle.close,
+		accountEquity,
+		positionState
+	);
+	if (!plan) {
+		if (fingerprintedIntent.intent !== "NO_ACTION") {
+			const reason =
+				fingerprintedIntent.intent === "CLOSE_LONG" ||
+				fingerprintedIntent.intent === "CLOSE_SHORT"
+					? "no_position_to_close"
+					: "risk_plan_rejected";
+			logExecutionSkipped(fingerprintedIntent, positionState.side, reason);
+		}
+	} else {
+		const skipReason = getPreExecutionSkipReason(plan, positionState);
+		if (skipReason) {
+			logExecutionSkipped(plan, positionState.side, skipReason);
+		} else {
+			logTradePlan(plan, context.candle, fingerprintedIntent);
+			try {
+				const result = await context.executionProvider.execute(plan, {
+					price: context.candle.close,
+				});
+				if (result.status === "skipped") {
+					logExecutionSkipped(
+						plan,
+						positionState.side,
+						result.reason ?? "execution_engine_skip"
+					);
+				} else {
+					logExecutionResult(result);
+				}
+			} catch (error) {
+				logExecutionError(error, plan);
+			}
+		}
+	}
+
+	const latestPosition = context.executionProvider.getPosition(context.symbol);
+	logPaperPosition(context.symbol, latestPosition);
+	const accountSnapshot = snapshotPaperAccount(
+		context.executionProvider,
+		calculateUnrealizedPnl(latestPosition, context.candle.close),
+		context.symbol,
+		context.candle.timestamp
+	);
+	if (accountSnapshot) {
+		fallbackEquity = accountSnapshot.equity;
+	}
+	return fallbackEquity;
+};
+
+const createDecisionContext = (
+	event: ClosedCandleEvent,
+	venues: VenueSelection
+): StrategyDecisionContext => ({
+	signalVenue: event.venue,
+	executionVenue: venues.executionVenue,
+	timeframe: event.timeframe,
+	isClosed: true,
+});
+
+const createMarketDataProvider = (
+	venue: string,
+	client: MexcClient,
+	pollIntervalMs: number
+): MarketDataProvider => {
+	switch (venue.toLowerCase()) {
+		case "binance":
+		case "binance-usdm":
+		case "binance_usdm":
+			return new BinanceUsdMMarketDataProvider();
+		default:
+			return new PollingMarketDataProvider(client, {
+				pollIntervalMs,
+				venue,
+			});
+	}
 };

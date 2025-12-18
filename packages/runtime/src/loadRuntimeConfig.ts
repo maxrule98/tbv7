@@ -5,6 +5,7 @@ import {
 	AgenaiConfig,
 	ConfigLoadOptions,
 	ConfigMetadata,
+	EnvConfig,
 	StrategyConfig,
 	StrategyId,
 	StrategyRuntimeParams,
@@ -35,6 +36,17 @@ export interface LoadRuntimeConfigOptions extends ConfigLoadOptions {
 	accountConfig?: AccountConfig;
 	cwd?: string;
 	workspaceRoot?: string;
+	signalVenue?: string;
+	executionVenue?: string;
+	signalTimeframes?: string[];
+	executionTimeframe?: string;
+}
+
+export interface VenueSelection {
+	signalVenue: string;
+	executionVenue: string;
+	signalTimeframes: string[];
+	executionTimeframe: string;
 }
 
 export interface LoadedRuntimeConfig {
@@ -46,6 +58,7 @@ export interface LoadedRuntimeConfig {
 	selection: StrategySelectionResult;
 	profiles: RuntimeProfileMetadata;
 	resolution: RuntimeConfigResolutionTrace;
+	venues: VenueSelection;
 }
 
 export interface RuntimeResolvedPathSummary {
@@ -192,6 +205,16 @@ export const loadRuntimeConfig = (
 	}
 
 	const runtimeParams = assertStrategyRuntimeParams(strategyConfig);
+	const venues = resolveVenueSelection({
+		env: agenaiConfig.env,
+		runtimeParams,
+		overrides: {
+			signalVenue: options.signalVenue,
+			executionVenue: options.executionVenue,
+			signalTimeframes: options.signalTimeframes,
+			executionTimeframe: options.executionTimeframe,
+		},
+	});
 	const resolution: RuntimeConfigResolutionTrace = {
 		cwd,
 		workspaceRoot,
@@ -234,5 +257,81 @@ export const loadRuntimeConfig = (
 			exchange: options.exchangeProfile,
 		},
 		resolution,
+		venues,
+	};
+};
+
+interface VenueResolutionOptions {
+	env: EnvConfig;
+	runtimeParams: StrategyRuntimeParams;
+	overrides?: {
+		signalVenue?: string;
+		executionVenue?: string;
+		signalTimeframes?: string[];
+		executionTimeframe?: string;
+	};
+}
+
+const normalizeVenue = (
+	value: string | undefined,
+	fallback: string
+): string => {
+	if (!value) {
+		return fallback;
+	}
+	return value.trim().toLowerCase();
+};
+
+const normalizeTimeframes = (
+	requested: string[] | undefined,
+	envValue: string[] | undefined,
+	runtimeDefault: string
+): string[] => {
+	const source = requested?.length
+		? requested
+		: envValue?.length
+			? envValue
+			: [runtimeDefault];
+	const unique = Array.from(
+		new Set(
+			source.map((frame) => frame.trim()).filter((frame) => frame.length > 0)
+		)
+	);
+	if (!unique.includes(runtimeDefault)) {
+		unique.push(runtimeDefault);
+	}
+	return unique;
+};
+
+const resolveVenueSelection = (
+	options: VenueResolutionOptions
+): VenueSelection => {
+	const defaultVenue = options.env.exchangeId?.toLowerCase() ?? "mexc";
+	const defaultSignalVenue =
+		options.env.signalVenue?.toLowerCase() ?? "binance";
+	const defaultExecutionVenue =
+		options.env.executionVenue?.toLowerCase() ?? defaultVenue;
+	const signalVenue = normalizeVenue(
+		options.overrides?.signalVenue ?? options.env.signalVenue,
+		defaultSignalVenue
+	);
+	const executionVenue = normalizeVenue(
+		options.overrides?.executionVenue ?? options.env.executionVenue,
+		defaultExecutionVenue
+	);
+	const signalTimeframes = normalizeTimeframes(
+		options.overrides?.signalTimeframes,
+		options.env.signalTimeframes,
+		options.runtimeParams.executionTimeframe
+	);
+	const executionTimeframe =
+		options.overrides?.executionTimeframe ??
+		options.env.executionTimeframe ??
+		options.runtimeParams.executionTimeframe;
+	return {
+		signalVenue,
+		executionVenue,
+		signalTimeframes,
+		executionTimeframe,
 	};
 };

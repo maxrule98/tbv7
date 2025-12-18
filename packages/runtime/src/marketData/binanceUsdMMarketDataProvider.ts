@@ -1,0 +1,423 @@
+import WebSocket from "ws";
+import { Candle } from "@agenai/core";
+import { timeframeToMs } from "@agenai/data";
+import { BinanceUsdMClient } from "@agenai/exchange-binance";
+import { runtimeLogger } from "../runtimeShared";
+import { normalizeSymbolForVenue } from "../symbols";
+import {
+	ClosedCandleEvent,
+	ClosedCandleHandler,
+	MarketDataBootstrapRequest,
+	MarketDataBootstrapResult,
+	MarketDataFeed,
+	MarketDataFeedOptions,
+	MarketDataProvider,
+} from "./types";
+
+const STREAM_ENDPOINT = "wss://fstream.binance.com/stream";
+const DEFAULT_BOOTSTRAP_LIMIT = 500;
+const GAP_FETCH_PADDING = 2;
+
+export class BinanceUsdMMarketDataProvider implements MarketDataProvider {
+	readonly venue = "binance";
+
+	constructor(private readonly client = new BinanceUsdMClient()) {}
+
+	async bootstrap(
+		request: MarketDataBootstrapRequest
+	): Promise<MarketDataBootstrapResult> {
+		const candlesByTimeframe = new Map<string, Candle[]>();
+		for (const timeframe of request.timeframes) {
+			const candles = await this.fetchCandles(
+				request.symbol,
+				timeframe,
+				request.limit || DEFAULT_BOOTSTRAP_LIMIT
+			);
+			candlesByTimeframe.set(timeframe, candles);
+		}
+		return { candlesByTimeframe };
+	}
+
+	createFeed(options: MarketDataFeedOptions): MarketDataFeed {
+		return new BinanceUsdMClosedCandleFeed({
+			...options,
+			venue: this.venue,
+			fetchCandles: (timeframe, limit, since) =>
+				this.fetchCandles(options.symbol, timeframe, limit, since),
+		});
+	}
+
+	async fetchCandles(
+		symbol: string,
+		timeframe: string,
+		limit: number,
+		since?: number
+	): Promise<Candle[]> {
+		return this.client.fetchOHLCV(symbol, timeframe, limit, since);
+	}
+}
+
+interface BinanceFeedOptions extends MarketDataFeedOptions {
+	venue: string;
+	fetchCandles: (
+		timeframe: string,
+		limit: number,
+		since?: number
+	) => Promise<Candle[]>;
+}
+
+class BinanceUsdMClosedCandleFeed implements MarketDataFeed {
+	private readonly listeners = new Set<ClosedCandleHandler>();
+	private readonly timeframes: string[];
+	private readonly timeframeMs: Map<string, number>;
+	private readonly lastProcessed = new Map<string, number>();
+	private readonly arrivalSamples = new Map<string, number[]>();
+	private readonly wsSymbol: string;
+	private ws: WebSocket | null = null;
+	private running = false;
+	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+	private readonly fallbackOffsetMs: number;
+
+	constructor(private readonly options: BinanceFeedOptions) {
+		this.timeframes = Array.from(new Set(options.timeframes));
+		this.timeframeMs = new Map(
+			this.timeframes.map((tf) => [tf, timeframeToMs(tf)])
+		);
+		this.wsSymbol = normalizeSymbolForVenue("binance", options.symbol)
+			.toLowerCase()
+			.replace(/[^a-z0-9]/g, "");
+		this.fallbackOffsetMs = options.fallbackOffsetMs ?? 500;
+	}
+
+	start(): void {
+		if (this.running) {
+			return;
+		}
+		this.running = true;
+		this.connect();
+		this.scheduleFallback();
+	}
+
+	stop(): void {
+		if (!this.running) {
+			return;
+		}
+		this.running = false;
+		this.cleanupWs();
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
+		if (this.fallbackTimer) {
+			clearTimeout(this.fallbackTimer);
+			this.fallbackTimer = null;
+		}
+	}
+
+	onCandle(handler: ClosedCandleHandler): () => void {
+		this.listeners.add(handler);
+		return () => this.listeners.delete(handler);
+	}
+
+	private connect(): void {
+		if (!this.running) {
+			return;
+		}
+		const stream = this.timeframes
+			.map((tf) => `${this.wsSymbol}@kline_${tf}`)
+			.join("/");
+		const url = `${STREAM_ENDPOINT}?streams=${stream}`;
+		this.ws = new WebSocket(url);
+		this.ws.on("open", () => {
+			runtimeLogger.info("binance_ws_connected", {
+				venue: this.options.venue,
+				symbol: this.options.symbol,
+				timeframes: this.timeframes,
+			});
+		});
+		this.ws.on("message", (payload) => {
+			void this.handleMessage(payload.toString());
+		});
+		this.ws.on("close", () => {
+			runtimeLogger.warn("binance_ws_disconnected", {
+				venue: this.options.venue,
+				symbol: this.options.symbol,
+			});
+			this.scheduleReconnect();
+		});
+		this.ws.on("error", (error) => {
+			runtimeLogger.error("binance_ws_error", {
+				message: error instanceof Error ? error.message : String(error),
+			});
+		});
+	}
+
+	private scheduleReconnect(): void {
+		if (!this.running) {
+			return;
+		}
+		if (this.reconnectTimer) {
+			return;
+		}
+		this.reconnectTimer = setTimeout(() => {
+			this.reconnectTimer = null;
+			this.cleanupWs();
+			this.connect();
+		}, 1_000);
+	}
+
+	private cleanupWs(): void {
+		if (this.ws) {
+			this.ws.removeAllListeners();
+			try {
+				this.ws.terminate();
+			} catch (error) {
+				// ignore termination errors
+			}
+			this.ws = null;
+		}
+	}
+
+	private async handleMessage(raw: string): Promise<void> {
+		if (!this.running) {
+			return;
+		}
+		try {
+			const payload = JSON.parse(raw) as {
+				stream?: string;
+				data?: {
+					e?: string;
+					E: number;
+					s: string;
+					k: Record<string, unknown>;
+				};
+			};
+			const stream = payload.stream ?? "";
+			const timeframe = this.extractTimeframe(stream);
+			if (!timeframe || !this.timeframeMs.has(timeframe)) {
+				return;
+			}
+			const kline = payload.data?.k as Record<string, unknown> | undefined;
+			if (!kline || kline.x !== true) {
+				return;
+			}
+			const candle = this.mapCandle(kline, timeframe);
+			await this.handleClosedCandle(timeframe, candle, Date.now(), "ws");
+		} catch (error) {
+			runtimeLogger.error("binance_ws_parse_error", {
+				message: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+
+	private extractTimeframe(stream: string): string | null {
+		const match = stream.match(/@kline_(.+)$/);
+		return match?.[1] ?? null;
+	}
+
+	private mapCandle(kline: Record<string, unknown>, timeframe: string): Candle {
+		return {
+			symbol: this.options.symbol,
+			timeframe,
+			timestamp: Number(kline.t ?? 0),
+			open: Number(kline.o ?? 0),
+			high: Number(kline.h ?? 0),
+			low: Number(kline.l ?? 0),
+			close: Number(kline.c ?? 0),
+			volume: Number(kline.v ?? 0),
+		};
+	}
+
+	private async handleClosedCandle(
+		timeframe: string,
+		candle: Candle,
+		receivedAt: number,
+		source: ClosedCandleEvent["source"],
+		gapFilled = false
+	): Promise<void> {
+		const tfMs = this.timeframeMs.get(timeframe);
+		if (!tfMs) {
+			return;
+		}
+		const lastTs = this.lastProcessed.get(timeframe) ?? 0;
+		if (lastTs && candle.timestamp <= lastTs) {
+			return;
+		}
+
+		if (lastTs && candle.timestamp > lastTs + tfMs) {
+			const missing = Math.floor((candle.timestamp - lastTs) / tfMs) - 1;
+			runtimeLogger.warn("candle_gap_detected", {
+				venue: this.options.venue,
+				symbol: this.options.symbol,
+				timeframe,
+				gapSize: missing,
+				lastTimestamp: lastTs,
+				currentTimestamp: candle.timestamp,
+			});
+			await this.repairGap(timeframe, lastTs + tfMs, candle.timestamp, tfMs);
+		}
+
+		await this.emitEvent(timeframe, candle, receivedAt, source, gapFilled);
+		this.lastProcessed.set(timeframe, candle.timestamp);
+	}
+
+	private async repairGap(
+		timeframe: string,
+		startTimestamp: number,
+		endTimestamp: number,
+		tfMs: number
+	): Promise<void> {
+		const needed = Math.max(
+			Math.floor((endTimestamp - startTimestamp) / tfMs),
+			1
+		);
+		const candles = await this.options.fetchCandles(
+			timeframe,
+			needed + GAP_FETCH_PADDING,
+			startTimestamp
+		);
+		const missingCandles = candles
+			.filter(
+				(candle) =>
+					candle.timestamp >= startTimestamp && candle.timestamp < endTimestamp
+			)
+			.sort((a, b) => a.timestamp - b.timestamp);
+		for (const candle of missingCandles) {
+			await this.emitEvent(timeframe, candle, Date.now(), "rest", true);
+			this.lastProcessed.set(timeframe, candle.timestamp);
+		}
+		if (missingCandles.length) {
+			runtimeLogger.info("candle_gap_repaired", {
+				venue: this.options.venue,
+				symbol: this.options.symbol,
+				timeframe,
+				repairedCandles: missingCandles.length,
+			});
+		}
+	}
+
+	private async emitEvent(
+		timeframe: string,
+		candle: Candle,
+		receivedAt: number,
+		source: ClosedCandleEvent["source"],
+		gapFilled: boolean
+	): Promise<void> {
+		const tfMs = this.timeframeMs.get(timeframe) ?? 0;
+		const expectedClose = candle.timestamp + tfMs;
+		const arrivalDelayMs = Math.max(0, receivedAt - expectedClose);
+		this.recordArrival(timeframe, arrivalDelayMs);
+		const event: ClosedCandleEvent = {
+			venue: this.options.venue,
+			symbol: this.options.symbol,
+			timeframe,
+			candle,
+			arrivalDelayMs,
+			gapFilled,
+			source,
+		};
+		runtimeLogger.info("candle_closed_emitted", {
+			venue: event.venue,
+			symbol: event.symbol,
+			timeframe: event.timeframe,
+			timestamp: candle.timestamp,
+			arrivalDelayMs,
+			source,
+			gapFilled,
+		});
+		await this.notifyListeners(event);
+	}
+
+	private recordArrival(timeframe: string, delay: number): void {
+		const samples = this.arrivalSamples.get(timeframe) ?? [];
+		samples.push(delay);
+		if (samples.length >= 50) {
+			const sorted = [...samples].sort((a, b) => a - b);
+			const p50 = this.percentile(sorted, 0.5);
+			const p95 = this.percentile(sorted, 0.95);
+			const max = sorted[sorted.length - 1];
+			runtimeLogger.info("candle_delay_summary", {
+				venue: this.options.venue,
+				timeframe,
+				p50,
+				p95,
+				max,
+				sampleSize: samples.length,
+			});
+			samples.length = 0;
+		}
+		this.arrivalSamples.set(timeframe, samples);
+	}
+
+	private percentile(values: number[], percentile: number): number {
+		if (!values.length) {
+			return 0;
+		}
+		const index = Math.min(
+			values.length - 1,
+			Math.floor(percentile * values.length)
+		);
+		return values[index];
+	}
+
+	private async notifyListeners(event: ClosedCandleEvent): Promise<void> {
+		if (!this.listeners.size) {
+			return;
+		}
+		const tasks = Array.from(this.listeners).map(async (handler) => {
+			try {
+				await handler(event);
+			} catch (error) {
+				runtimeLogger.error("candle_handler_error", {
+					message: error instanceof Error ? error.message : String(error),
+				});
+			}
+		});
+		await Promise.allSettled(tasks);
+	}
+
+	private scheduleFallback(): void {
+		if (!this.running) {
+			return;
+		}
+		const now = Date.now();
+		const nextMinute = Math.floor(now / 60_000) * 60_000 + 60_000;
+		const target = nextMinute + this.fallbackOffsetMs;
+		const delay = Math.max(target - now, 500);
+		this.fallbackTimer = setTimeout(() => {
+			this.fallbackTimer = null;
+			void this.runFallback().finally(() => this.scheduleFallback());
+		}, delay);
+	}
+
+	private async runFallback(): Promise<void> {
+		if (!this.running) {
+			return;
+		}
+		for (const timeframe of this.timeframes) {
+			const lastTs = this.lastProcessed.get(timeframe) ?? 0;
+			const tfMs = this.timeframeMs.get(timeframe) ?? 0;
+			if (!tfMs) {
+				continue;
+			}
+			const expectedNext = lastTs + tfMs;
+			if (lastTs && Date.now() < expectedNext + this.fallbackOffsetMs) {
+				continue;
+			}
+			try {
+				const candles = await this.options.fetchCandles(timeframe, 2);
+				const latest = candles[candles.length - 1];
+				if (!latest) {
+					continue;
+				}
+				await this.handleClosedCandle(timeframe, latest, Date.now(), "poll");
+			} catch (error) {
+				runtimeLogger.warn("binance_fallback_error", {
+					timeframe,
+					message: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
+	}
+}

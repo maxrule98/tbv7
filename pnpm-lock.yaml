@@ -180,6 +180,13 @@ importers:
       '@agenai/risk-engine':
         specifier: workspace:*
         version: link:../risk-engine
+      ws:
+        specifier: ^8.16.0
+        version: 8.18.3
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.5.10
+        version: 8.18.1
 
   packages/strategy-engine:
     dependencies:

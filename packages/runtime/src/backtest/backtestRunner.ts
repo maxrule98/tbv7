@@ -28,6 +28,7 @@ import {
 import { RiskManager, TradePlan } from "@agenai/risk-engine";
 import {
 	StrategySource,
+	StrategyRuntimeMode,
 	calculateUnrealizedPnl,
 	enrichIntentMetadata,
 	getPreExecutionSkipReason,
@@ -49,9 +50,9 @@ import {
 	ExecutionHook,
 	withRuntimeFingerprints,
 } from "../runtimeShared";
-import type { TraderStrategy } from "../types";
+import type { StrategyDecisionContext, TraderStrategy } from "../types";
 import { WarmupMap } from "../runtimeFactory";
-import type { LoadedRuntimeConfig } from "../loadRuntimeConfig";
+import type { LoadedRuntimeConfig, VenueSelection } from "../loadRuntimeConfig";
 import {
 	createRuntimeSnapshot,
 	createRuntime,
@@ -65,6 +66,36 @@ import {
 	BacktestTrade,
 } from "./backtestTypes";
 import { buildRuntimeFingerprintLogPayload } from "../runtimeFingerprint";
+import type { ExecutionProvider } from "../execution/executionProvider";
+
+class BacktestExecutionProvider implements ExecutionProvider {
+	readonly venue = "backtest";
+	readonly mode: StrategyRuntimeMode = "backtest";
+
+	constructor(private readonly engine: ExecutionEngine) {}
+
+	getPosition(symbol: string): PaperPositionSnapshot {
+		return this.engine.getPosition(symbol);
+	}
+
+	updatePosition(
+		symbol: string,
+		updates: Partial<PaperPositionSnapshot>
+	): void {
+		this.engine.updatePosition(symbol, updates);
+	}
+
+	snapshotAccount(unrealizedPnl: number): PaperAccountSnapshot | null {
+		return this.engine.snapshotPaperAccount(unrealizedPnl);
+	}
+
+	execute(
+		plan: TradePlan,
+		context: { price: number }
+	): Promise<ExecutionResult> {
+		return this.engine.execute(plan, context);
+	}
+}
 
 export interface RunBacktestOptions {
 	runtimeSnapshot?: RuntimeSnapshot;
@@ -121,6 +152,7 @@ export const runBacktest = async (
 		strategyConfigFingerprint: runtimeSnapshot.strategyConfigFingerprint,
 		runtimeContextFingerprint: runtimeSnapshot.runtimeContextFingerprint,
 	};
+	const venues = runtimeBootstrap.venues;
 
 	const agenaiConfig = runtimeBootstrap.agenaiConfig;
 	const resolvedStrategyId = runtimeBootstrap.strategyId;
@@ -163,6 +195,7 @@ export const runBacktest = async (
 		mode: "paper",
 		paperAccount,
 	});
+	const executionProvider = new BacktestExecutionProvider(executionEngine);
 
 	runtimeLogger.info("backtest_config", {
 		symbol,
@@ -268,6 +301,7 @@ export const runBacktest = async (
 
 	const trades: BacktestTrade[] = [];
 	const equitySnapshots: PaperAccountSnapshot[] = [];
+	const decisionContext = createDecisionContext(venues, timeframe);
 	let fallbackEquity = initialBalance;
 
 	for (const candle of executionSeries.candles) {
@@ -288,9 +322,9 @@ export const runBacktest = async (
 			continue;
 		}
 
-		const positionState = executionEngine.getPosition(symbol);
+		const positionState = executionProvider.getPosition(symbol);
 		const unrealizedPnl = calculateUnrealizedPnl(positionState, candle.close);
-		const prePlanSnapshot = executionEngine.snapshotPaperAccount(unrealizedPnl);
+		const prePlanSnapshot = executionProvider.snapshotAccount(unrealizedPnl);
 		const accountEquity = prePlanSnapshot?.equity ?? fallbackEquity;
 
 		const recordHook = createExecutionRecorder(trades, candle, positionState);
@@ -299,14 +333,14 @@ export const runBacktest = async (
 			positionState,
 			candle,
 			riskManager,
-			executionEngine,
+			executionProvider,
 			accountEquity,
 			recordHook,
 			runtimeFingerprints
 		);
 		if (forcedExitHandled) {
 			const accountSnapshot = logAndSnapshotPosition(
-				executionEngine,
+				executionProvider,
 				symbol,
 				candle.close,
 				candle.timestamp
@@ -323,7 +357,7 @@ export const runBacktest = async (
 			positionState,
 			candle,
 			riskManager,
-			executionEngine,
+			executionProvider,
 			accountEquity,
 			agenaiConfig.risk,
 			recordHook,
@@ -331,7 +365,7 @@ export const runBacktest = async (
 		);
 		if (trailingExitHandled) {
 			const accountSnapshot = logAndSnapshotPosition(
-				executionEngine,
+				executionProvider,
 				symbol,
 				candle.close,
 				candle.timestamp
@@ -344,7 +378,7 @@ export const runBacktest = async (
 		}
 
 		const intent = enrichIntentMetadata(
-			await strategy.decide(buffer, positionState.side)
+			await strategy.decide(buffer, positionState.side, decisionContext)
 		);
 		const fingerprintedIntent = withRuntimeFingerprints(
 			intent,
@@ -375,7 +409,7 @@ export const runBacktest = async (
 			} else {
 				logTradePlan(plan, candle, fingerprintedIntent);
 				try {
-					const result = await executionEngine.execute(plan, {
+					const result = await executionProvider.execute(plan, {
 						price: candle.close,
 					});
 					if (result.status === "skipped") {
@@ -394,11 +428,11 @@ export const runBacktest = async (
 			}
 		}
 
-		const latestPosition = executionEngine.getPosition(symbol);
+		const latestPosition = executionProvider.getPosition(symbol);
 		logPaperPosition(symbol, latestPosition);
 
 		const accountSnapshot = snapshotPaperAccount(
-			executionEngine,
+			executionProvider,
 			calculateUnrealizedPnl(latestPosition, candle.close),
 			symbol,
 			candle.timestamp
@@ -572,8 +606,11 @@ const createCacheDrivenAdapter = (
 	strategy: CacheDrivenStrategy
 ): TraderStrategy => {
 	return {
-		decide: (_candles: Candle[], position: PositionSide) =>
-			strategy.decide(position),
+		decide: (
+			_candles: Candle[],
+			position: PositionSide,
+			_context: StrategyDecisionContext
+		) => strategy.decide(position),
 	};
 };
 
@@ -582,7 +619,7 @@ const createExecutionRecorder = (
 	candle: Candle,
 	priorPosition: PaperPositionSnapshot
 ): ExecutionHook => {
-	return (plan, result) => {
+	return (plan, result, _candle) => {
 		if (result.status === "skipped") {
 			return;
 		}
@@ -613,3 +650,13 @@ const recordTrade = (
 	};
 	trades.push(trade);
 };
+
+const createDecisionContext = (
+	venues: VenueSelection,
+	timeframe: string
+): StrategyDecisionContext => ({
+	signalVenue: venues.signalVenue,
+	executionVenue: venues.executionVenue,
+	timeframe,
+	isClosed: true,
+});

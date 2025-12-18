@@ -10,6 +10,7 @@ import type {
 	LoadedRuntimeConfig,
 	RuntimeConfigResolutionTrace,
 	RuntimeResolvedPathSummary,
+	VenueSelection,
 } from "./loadRuntimeConfig";
 import { createRuntimeSnapshot } from "./runtimeSnapshot";
 import {
@@ -118,6 +119,19 @@ const mockResolution: RuntimeConfigResolutionTrace = {
 	),
 };
 
+const mockVenues: VenueSelection = {
+	signalVenue: "mexc",
+	executionVenue: "mexc",
+	signalTimeframes: Array.from(
+		new Set([
+			strategyConfig.timeframes?.execution ?? "1m",
+			strategyConfig.timeframes?.confirming ?? "5m",
+			...(strategyConfig.trackedTimeframes ?? []),
+		])
+	),
+	executionTimeframe: strategyConfig.timeframes?.execution ?? "1m",
+};
+
 const runtimeConfig: LoadedRuntimeConfig = {
 	agenaiConfig,
 	accountConfig,
@@ -132,6 +146,7 @@ const runtimeConfig: LoadedRuntimeConfig = {
 	selection,
 	profiles: {},
 	resolution: mockResolution,
+	venues: mockVenues,
 };
 
 describe("runtime parity", () => {

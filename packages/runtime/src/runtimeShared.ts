@@ -9,7 +9,6 @@ import {
 	summarizeCandles,
 } from "@agenai/core";
 import {
-	ExecutionEngine,
 	ExecutionResult,
 	PaperAccountSnapshot,
 	PaperPositionSnapshot,
@@ -18,6 +17,7 @@ import { RiskManager, TradePlan } from "@agenai/risk-engine";
 import type { TraderStrategy } from "./types";
 import type { StrategyRuntimeMetadata } from "./runtimeFactory";
 import type { StrategyRuntimeFingerprints } from "./fingerprints";
+import type { ExecutionProvider } from "./execution/executionProvider";
 
 export const runtimeLogger = createLogger("trader-runtime");
 
@@ -388,12 +388,12 @@ export const logPaperAccountSnapshot = (
 };
 
 export const snapshotPaperAccount = (
-	executionEngine: ExecutionEngine,
+	executionProvider: ExecutionProvider,
 	unrealizedPnl: number,
 	symbol: string,
 	timestamp: number
 ): PaperAccountSnapshot | null => {
-	const snapshot = executionEngine.snapshotPaperAccount(unrealizedPnl);
+	const snapshot = executionProvider.snapshotAccount(unrealizedPnl);
 	if (!snapshot) {
 		return null;
 	}
@@ -403,15 +403,15 @@ export const snapshotPaperAccount = (
 };
 
 export const logAndSnapshotPosition = (
-	executionEngine: ExecutionEngine,
+	executionProvider: ExecutionProvider,
 	symbol: string,
 	price: number,
 	timestamp: number
 ): PaperAccountSnapshot | null => {
-	const latestPosition = executionEngine.getPosition(symbol);
+	const latestPosition = executionProvider.getPosition(symbol);
 	logPaperPosition(symbol, latestPosition);
 	return snapshotPaperAccount(
-		executionEngine,
+		executionProvider,
 		calculateUnrealizedPnl(latestPosition, price),
 		symbol,
 		timestamp
@@ -476,7 +476,7 @@ export const maybeHandleForcedExit = async (
 	positionState: PaperPositionSnapshot,
 	lastCandle: Candle,
 	riskManager: RiskManager,
-	executionEngine: ExecutionEngine,
+	executionProvider: ExecutionProvider,
 	accountEquity: number,
 	onExecuted?: ExecutionHook,
 	fingerprints?: StrategyRuntimeFingerprints
@@ -546,7 +546,7 @@ export const maybeHandleForcedExit = async (
 
 	logTradePlan(plan, lastCandle, fingerprintedIntent);
 	try {
-		const result = await executionEngine.execute(plan, {
+		const result = await executionProvider.execute(plan, {
 			price: lastCandle.close,
 		});
 		if (result.status === "skipped") {
@@ -571,7 +571,7 @@ export const maybeHandleTrailingStop = async (
 	positionState: PaperPositionSnapshot,
 	lastCandle: Candle,
 	riskManager: RiskManager,
-	executionEngine: ExecutionEngine,
+	executionProvider: ExecutionProvider,
 	accountEquity: number,
 	riskConfig: RiskConfig,
 	onExecuted?: ExecutionHook,
@@ -621,7 +621,7 @@ export const maybeHandleTrailingStop = async (
 
 	if (!isTrailingActive) {
 		if (Object.keys(updates).length) {
-			executionEngine.updatePosition(symbol, updates);
+			executionProvider.updatePosition(symbol, updates);
 		}
 		return false;
 	}
@@ -650,7 +650,7 @@ export const maybeHandleTrailingStop = async (
 	}
 
 	if (Object.keys(updates).length) {
-		executionEngine.updatePosition(symbol, updates);
+		executionProvider.updatePosition(symbol, updates);
 	}
 
 	const stopStillValid = trailingStopPrice > 0;
@@ -703,7 +703,7 @@ export const maybeHandleTrailingStop = async (
 
 	logTradePlan(plan, lastCandle, fingerprintedIntent);
 	try {
-		const result = await executionEngine.execute(plan, {
+		const result = await executionProvider.execute(plan, {
 			price: lastCandle.close,
 		});
 		if (result.status === "skipped") {

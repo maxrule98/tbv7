@@ -128,6 +128,10 @@ export interface EnvConfig {
 	mexcApiSecret: string;
 	defaultSymbol: string;
 	defaultTimeframe: string;
+	signalVenue?: string;
+	executionVenue?: string;
+	signalTimeframes?: string[];
+	executionTimeframe?: string;
 }
 
 export interface ExchangeConfig extends ExchangeConfigFile {
@@ -215,6 +219,26 @@ const getEnvVar = (key: string, fallback?: string): string => {
 	throw new Error(`Missing required environment variable: ${key}`);
 };
 
+const readOptionalEnvVar = (key: string): string | undefined => {
+	const value = process.env[key];
+	if (typeof value !== "string") {
+		return undefined;
+	}
+	const trimmed = value.trim();
+	return trimmed.length ? trimmed : undefined;
+};
+
+const parseTimeframeList = (value?: string): string[] | undefined => {
+	if (!value) {
+		return undefined;
+	}
+	const frames = value
+		.split(",")
+		.map((token) => token.trim())
+		.filter((token) => token.length > 0);
+	return frames.length ? frames : undefined;
+};
+
 const normalizeExecutionMode = (value: string | undefined): ExecutionMode => {
 	return value?.toLowerCase() === "live" ? "live" : "paper";
 };
@@ -238,6 +262,12 @@ export const loadEnvConfig = (envPath = getDefaultEnvPath()): EnvConfig => {
 		mexcApiSecret: getEnvVar("MEXC_API_SECRET", ""),
 		defaultSymbol: getEnvVar("DEFAULT_SYMBOL", ""),
 		defaultTimeframe: getEnvVar("DEFAULT_TIMEFRAME", ""),
+		signalVenue: readOptionalEnvVar("SIGNAL_VENUE"),
+		executionVenue: readOptionalEnvVar("EXECUTION_VENUE"),
+		signalTimeframes: parseTimeframeList(
+			readOptionalEnvVar("SIGNAL_TIMEFRAMES")
+		),
+		executionTimeframe: readOptionalEnvVar("EXECUTION_TIMEFRAME"),
 	};
 };
 

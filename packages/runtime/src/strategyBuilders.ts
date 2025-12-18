@@ -7,17 +7,22 @@ import {
 	createLogger,
 	loadStrategy,
 } from "@agenai/core";
-import { MexcClient } from "@agenai/exchange-mexc";
-import type { TraderStrategy } from "./types";
+import type { StrategyDecisionContext, TraderStrategy } from "./types";
 import type {
 	StrategyRuntimeBuilder,
 	StrategyRuntimeBuilderContext,
 } from "./runtimeFactory";
 
 const logger = createLogger("strategy-builder");
+type CandleFetcher = (
+	symbol: string,
+	timeframe: string,
+	limit: number
+) => Promise<Candle[]>;
+
 export const resolveStrategyBuilder = (
 	strategyId: StrategyId,
-	client: MexcClient
+	fetcher: CandleFetcher
 ): StrategyRuntimeBuilder => {
 	return async (
 		context: StrategyRuntimeBuilderContext
@@ -30,7 +35,7 @@ export const resolveStrategyBuilder = (
 			config: context.strategyConfig,
 			cache: {
 				fetcher: (symbolArg: string, timeframeArg: string, limit: number) =>
-					client.fetchOHLCV(symbolArg, timeframeArg, limit),
+					fetcher(symbolArg, timeframeArg, limit),
 				symbol: context.runtimeParams.symbol,
 				timeframes,
 				maxAgeMs: cacheTtl,
@@ -70,7 +75,8 @@ class CacheBackedStrategyAdapter implements TraderStrategy {
 
 	async decide(
 		_candles: Candle[],
-		position: PositionSide
+		position: PositionSide,
+		_context: StrategyDecisionContext
 	): Promise<TradeIntent> {
 		await this.cache.refreshAll();
 		return this.strategy.decide(position);

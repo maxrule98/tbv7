@@ -14,6 +14,10 @@
 		"@agenai/exchange-binance": "workspace:*",
 		"@agenai/exchange-mexc": "workspace:*",
 		"@agenai/execution-engine": "workspace:*",
-		"@agenai/risk-engine": "workspace:*"
+		"@agenai/risk-engine": "workspace:*",
+		"ws": "^8.16.0"
+	},
+	"devDependencies": {
+		"@types/ws": "^8.5.10"
 	}
 }
