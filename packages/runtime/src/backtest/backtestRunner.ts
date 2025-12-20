@@ -16,7 +16,7 @@ import {
 	type MarketDataClient,
 	type TimeframeSeries,
 } from "@agenai/data";
-import { BinanceSpotClient } from "@agenai/exchange-binance";
+import { BinanceUsdMClient } from "@agenai/exchange-binance";
 import { MexcClient } from "@agenai/exchange-mexc";
 import {
 	ExecutionEngine,
@@ -180,7 +180,7 @@ export const runBacktest = async (
 		});
 
 	const marketDataClient: MarketDataClient =
-		options.marketDataClient ?? new BinanceSpotClient();
+		options.marketDataClient ?? new BinanceUsdMClient();
 
 	const dataProvider =
 		options.dataProvider ??

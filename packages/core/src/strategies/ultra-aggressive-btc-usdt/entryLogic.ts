@@ -322,10 +322,7 @@ const passesSessionFilters = (
 		) {
 			return false;
 		}
-		if (
-			filters.blockedLongSessions?.includes(session) &&
-			!trendOverride
-		) {
+		if (filters.blockedLongSessions?.includes(session) && !trendOverride) {
 			return false;
 		}
 		return true;
@@ -400,19 +397,13 @@ const passesQualityFilters = (
 	) {
 		return false;
 	}
-	if (
-		isLong &&
-		typeof filters.requireLongDiscountToVwapPct === "number"
-	) {
+	if (isLong && typeof filters.requireLongDiscountToVwapPct === "number") {
 		const longThreshold = Math.abs(filters.requireLongDiscountToVwapPct);
 		if (vwapDeviation === null || vwapDeviation > -longThreshold) {
 			return false;
 		}
 	}
-	if (
-		isShort &&
-		typeof filters.requireShortPremiumToVwapPct === "number"
-	) {
+	if (isShort && typeof filters.requireShortPremiumToVwapPct === "number") {
 		const shortThreshold = Math.abs(filters.requireShortPremiumToVwapPct);
 		if (vwapDeviation === null || vwapDeviation < shortThreshold) {
 			return false;
@@ -677,17 +668,17 @@ const getDynamicRiskPct = (
 ): number => {
 	const maxRisk = risk.maxRiskPerTradePct ?? risk.riskPerTradePct;
 	const baseRisk = risk.riskPerTradePct;
-	
+
 	// Liquidity sweep with high confidence gets max risk
-	if (reason.includes("liquidity_sweep") && confidence >= 0.30) {
+	if (reason.includes("liquidity_sweep") && confidence >= 0.3) {
 		return maxRisk;
 	}
-	
+
 	// Breakout with very high confidence gets max risk
 	if (reason.includes("trend_ignition") && confidence >= 0.35) {
 		return maxRisk;
 	}
-	
+
 	// All other setups use base risk
 	return baseRisk;
 };
@@ -700,14 +691,14 @@ const buildSetupDecision = (
 ): SetupDecision => {
 	const confidence = computeConfidenceScore(ctx, intent, reason);
 	const dynamicRiskPct = getDynamicRiskPct(reason, confidence, risk);
-	
+
 	const sideMultiplier = intent === "OPEN_LONG" ? 1 : -1;
 	const stopDistance =
 		(ctx.indicator.atr1m ?? ctx.price * 0.002) * risk.atrStopMultiple;
 	const stop = ctx.price - sideMultiplier * stopDistance;
 	const tp1 = ctx.price + sideMultiplier * stopDistance * risk.partialTpRR;
 	const tp2 = ctx.price + sideMultiplier * stopDistance * risk.finalTpRR;
-	
+
 	return {
 		intent,
 		reason,
@@ -733,8 +724,7 @@ export const evaluateRiskBlocks = (
 	if (
 		config.equityThrottle?.enabled &&
 		config.equityThrottle.maxDrawdownPct > 0 &&
-		state.rollingDrawdownPct <=
-			-config.equityThrottle.maxDrawdownPct
+		state.rollingDrawdownPct <= -config.equityThrottle.maxDrawdownPct
 	) {
 		return "equityThrottle";
 	}

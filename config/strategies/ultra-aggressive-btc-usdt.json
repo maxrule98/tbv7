@@ -54,20 +54,20 @@
 		"trailingAtrMultiple": 0.6
 	},
 	"qualityFilters": {
-		"minConfidence": 0.22,
+		"minConfidence": 0.15,
 		"playTypeMinConfidence": {
-			"liquiditySweep": 0.25,
-			"breakoutTrap": 0.28,
-			"breakout": 0.22,
-			"meanReversion": 0.24
+			"liquiditySweep": 0.18,
+			"breakoutTrap": 0.2,
+			"breakout": 0.15,
+			"meanReversion": 0.17
 		},
-		"requireCvdAlignment": true,
+		"requireCvdAlignment": false,
 		"requireStrongLongCvd": false,
-		"allowShortsAgainstCvd": false,
+		"allowShortsAgainstCvd": true,
 		"minLongTrendSlopePct": 0,
 		"minShortTrendSlopePct": 0,
-		"requireLongDiscountToVwapPct": 0.0005,
-		"requireShortPremiumToVwapPct": 0.0005,
+		"requireLongDiscountToVwapPct": 0.0001,
+		"requireShortPremiumToVwapPct": 0.0001,
 		"maxTrendSlopePctForCounterTrend": 0.008,
 		"maxVolatilityForMeanReversion": "balanced"
 	},
