@@ -1,4 +1,4 @@
-import { createLogger } from "../../..";
+import { createLogger } from "../..";
 
 const logger = createLogger("vwap-full-traversal-metrics");
 

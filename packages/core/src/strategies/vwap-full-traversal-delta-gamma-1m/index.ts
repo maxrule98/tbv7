@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Candle, PositionSide, TradeIntent, createLogger } from "../../..";
+import { Candle, PositionSide, TradeIntent, createLogger } from "../..";
 import { getDefaultStrategyDir, resolveStrategyConfigPath } from "../../config";
 import {
 	MultiTimeframeCache,
