@@ -1,0 +1,16 @@
+{
+	"id": "vwap_full_traversal_delta_gamma_1m",
+	"name": "VWAP Full Traversal Delta Gamma 1m",
+	"symbol": "BTC/USDT",
+	"timeframes": {
+		"execution": "1m"
+	},
+	"historyWindowCandles": 500,
+	"warmupPeriods": {
+		"default": 100,
+		"1m": 100
+	},
+	"cacheTTLms": 1500,
+	"sdMultiplier": 1.5,
+	"stopMultiplier": 0.25
+}
