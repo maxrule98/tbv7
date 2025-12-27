@@ -1,5 +1,12 @@
 import ccxt, { Balances, Exchange, OHLCV, Order, Position } from "ccxt";
-import { Candle, PositionSide, createLogger } from "@agenai/core";
+import {
+	Candle,
+	PositionSide,
+	createLogger,
+	ExchangeAdapter,
+	ExchangePositionSnapshot,
+	ExchangeOrder,
+} from "@agenai/core";
 import { mapCcxtCandleToCandle } from "./utils/ccxtMapper";
 
 const mexcLogger = createLogger("exchange:mexc");
@@ -10,14 +17,7 @@ export interface MexcClientOptions {
 	useFutures?: boolean;
 }
 
-export interface ExchangePositionSnapshot {
-	side: PositionSide;
-	size: number;
-	entryPrice: number | null;
-	unrealizedPnl: number | null;
-}
-
-export class MexcClient {
+export class MexcClient implements ExchangeAdapter {
 	private readonly exchange: Exchange;
 	private marketsLoaded = false;
 
@@ -56,9 +56,14 @@ export class MexcClient {
 		symbol: string,
 		side: "buy" | "sell",
 		amount: number
-	): Promise<Order> {
+	): Promise<ExchangeOrder> {
 		const marketSymbol = await this.resolveMarketSymbol(symbol);
-		return this.exchange.createOrder(marketSymbol, "market", side, amount);
+		return this.exchange.createOrder(
+			marketSymbol,
+			"market",
+			side,
+			amount
+		) as Promise<ExchangeOrder>;
 	}
 
 	async getBalanceUSDT(): Promise<number> {
@@ -151,3 +156,4 @@ export class MexcClient {
 }
 
 export { mapCcxtCandleToCandle } from "./utils/ccxtMapper";
+export type { ExchangePositionSnapshot, ExchangeOrder } from "@agenai/core";
