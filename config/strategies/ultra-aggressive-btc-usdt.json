@@ -1,7 +1,6 @@
 {
 	"id": "ultra_aggressive_btc_usdt",
 	"name": "Ultra Aggressive BTC/USDT",
-	"symbol": "BTC/USDT",
 	"timeframes": {
 		"execution": "1m",
 		"confirming": "5m",

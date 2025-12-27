@@ -1,5 +1,6 @@
 import ccxt, { Balances, Exchange, OHLCV, Order, Position } from "ccxt";
 import { Candle, PositionSide, createLogger } from "@agenai/core";
+import { mapCcxtCandleToCandle } from "./utils/ccxtMapper";
 
 const mexcLogger = createLogger("exchange:mexc");
 
@@ -47,7 +48,7 @@ export class MexcClient {
 		);
 
 		return ohlcv.map((row: OHLCV) =>
-			MexcClient.mapCandle(row, symbol, timeframe)
+			mapCcxtCandleToCandle(row, symbol, timeframe)
 		);
 	}
 
@@ -139,24 +140,6 @@ export class MexcClient {
 		this.marketsLoaded = true;
 	}
 
-	private static mapCandle(
-		row: OHLCV,
-		symbol: string,
-		timeframe: string
-	): Candle {
-		const [timestamp, open, high, low, close, volume] = row;
-		return {
-			symbol,
-			timeframe,
-			timestamp: Number(timestamp ?? 0),
-			open: Number(open ?? 0),
-			high: Number(high ?? 0),
-			low: Number(low ?? 0),
-			close: Number(close ?? 0),
-			volume: Number(volume ?? 0),
-		};
-	}
-
 	private static emptyPosition(): ExchangePositionSnapshot {
 		return {
 			side: "FLAT",
@@ -166,3 +149,5 @@ export class MexcClient {
 		};
 	}
 }
+
+export { mapCcxtCandleToCandle } from "./utils/ccxtMapper";

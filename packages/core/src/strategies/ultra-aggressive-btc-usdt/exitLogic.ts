@@ -1,4 +1,4 @@
-import { Candle, PositionSide, TradeIntent } from "../../types";
+import { Candle, PositionSide, TradeIntent, MINUTE_MS } from "../../types";
 import { StrategyContextSnapshot } from "./entryLogic";
 import { UltraAggressiveBtcUsdtConfig } from "./config";
 
@@ -33,7 +33,7 @@ export const evaluateExitDecision = (
 		return { intent: null };
 	}
 	const latestTs = ctx.timestamp;
-	const maxDuration = config.maxTradeDurationMinutes * 60 * 1000;
+	const maxDuration = config.maxTradeDurationMinutes * MINUTE_MS;
 	if (latestTs - memory.openedAt >= maxDuration) {
 		return {
 			intent: buildCloseIntent(ctx, position, "max_duration_exit"),

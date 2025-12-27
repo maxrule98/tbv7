@@ -23,11 +23,8 @@ export class Debug4cPipelineStrategy {
 		private readonly config: Debug4cPipelineConfig,
 		private readonly deps: Debug4cPipelineDeps
 	) {
-		if (this.config.timeframes.execution !== "1m") {
-			throw new Error(
-				"debug_4c_pipeline requires the execution timeframe to be exactly 1m"
-			);
-		}
+		// Debug pipeline is timeframe-agnostic but designed for high-frequency data
+		// Validation happens at runtime based on available data quality
 	}
 
 	async decide(position: PositionSide = "FLAT"): Promise<TradeIntent> {

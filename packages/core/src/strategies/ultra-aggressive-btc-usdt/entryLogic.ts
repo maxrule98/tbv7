@@ -4,7 +4,7 @@ import {
 	calculateRSI,
 	ema,
 } from "@agenai/indicators";
-import { Candle, TradeIntent } from "../../types";
+import { Candle, TradeIntent, DAY_MS } from "../../types";
 import {
 	UltraAggressiveBtcUsdtConfig,
 	UltraAggressiveRiskConfig,
@@ -531,7 +531,7 @@ const computeLevels = (
 	const sameDay = filterByUtcDay(executionCandles, latest.timestamp);
 	const previousDay = filterByUtcDay(
 		executionCandles,
-		latest.timestamp - 24 * 60 * 60 * 1000
+		latest.timestamp - DAY_MS
 	);
 	const executionRange = executionCandles.slice(
 		-config.lookbacks.rangeDetection
@@ -854,7 +854,7 @@ const filterByUtcDay = (candles: Candle[], referenceTs: number): Candle[] => {
 		date.getUTCMonth(),
 		date.getUTCDate()
 	);
-	const end = start + 24 * 60 * 60 * 1000;
+	const end = start + DAY_MS;
 	return candles.filter(
 		(candle) => candle.timestamp >= start && candle.timestamp < end
 	);

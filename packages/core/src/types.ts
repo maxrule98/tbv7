@@ -1,3 +1,5 @@
+export * from "./time";
+
 export interface Candle {
 	symbol: string;
 	timeframe: string;

@@ -1,23 +1,6 @@
 import ccxt, { Exchange, OHLCV } from "ccxt";
 import { Candle } from "@agenai/core";
-
-const mapCcxtCandle = (
-	row: OHLCV,
-	symbol: string,
-	timeframe: string
-): Candle => {
-	const [timestamp, open, high, low, close, volume] = row;
-	return {
-		symbol,
-		timeframe,
-		timestamp: Number(timestamp ?? 0),
-		open: Number(open ?? 0),
-		high: Number(high ?? 0),
-		low: Number(low ?? 0),
-		close: Number(close ?? 0),
-		volume: Number(volume ?? 0),
-	};
-};
+import { mapCcxtCandleToCandle } from "@agenai/exchange-mexc";
 
 export interface BinanceSpotClientOptions {
 	apiKey?: string;
@@ -50,7 +33,9 @@ export class BinanceSpotClient {
 			since,
 			limit
 		);
-		return rows.map((row: any) => mapCcxtCandle(row, symbol, timeframe));
+		return rows.map((row: OHLCV) =>
+			mapCcxtCandleToCandle(row, symbol, timeframe)
+		);
 	}
 }
 
@@ -82,6 +67,8 @@ export class BinanceUsdMClient {
 			since,
 			limit
 		);
-		return rows.map((row: any) => mapCcxtCandle(row, symbol, timeframe));
+		return rows.map((row: OHLCV) =>
+			mapCcxtCandleToCandle(row, symbol, timeframe)
+		);
 	}
 }

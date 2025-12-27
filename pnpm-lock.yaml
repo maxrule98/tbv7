@@ -52,8 +52,6 @@ importers:
         specifier: workspace:*
         version: link:../../packages/runtime
 
-  apps/dashboard: {}
-
   apps/trader-cli:
     dependencies:
       '@agenai/core':
@@ -71,8 +69,6 @@ importers:
       '@agenai/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
-
-  packages/backtest-core: {}
 
   packages/core:
     dependencies:
@@ -114,6 +110,9 @@ importers:
       '@agenai/core':
         specifier: workspace:*
         version: link:../core
+      '@agenai/exchange-mexc':
+        specifier: workspace:*
+        version: link:../exchange-mexc
       ccxt:
         specifier: ^4.3.81
         version: 4.5.19
@@ -151,8 +150,6 @@ importers:
         version: link:../runtime
 
   packages/models-quant: {}
-
-  packages/persistence: {}
 
   packages/risk-engine:
     dependencies:

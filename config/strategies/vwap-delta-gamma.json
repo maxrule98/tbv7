@@ -1,7 +1,6 @@
 {
 	"id": "vwap_delta_gamma",
 	"name": "VWAPDeltaGamma",
-	"symbol": "BTC/USDT",
 	"timeframes": {
 		"execution": "1m",
 		"trend": "5m",
