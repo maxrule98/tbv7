@@ -9,3 +9,4 @@ export * from "./runtimeSnapshot";
 export * from "./parseStrategyArg";
 export * from "./marketData";
 export * from "./execution/executionProvider";
+export * from "./loop/runTick";

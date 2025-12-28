@@ -28,26 +28,12 @@ import { RiskManager, TradePlan } from "@agenai/risk-engine";
 import {
 	StrategySource,
 	StrategyRuntimeMode,
-	calculateUnrealizedPnl,
-	enrichIntentMetadata,
-	getPreExecutionSkipReason,
-	logAndSnapshotPosition,
-	logExecutionError,
-	logExecutionResult,
-	logExecutionSkipped,
-	logPaperPosition,
 	logRiskConfig,
-	logStrategyDecision,
 	logStrategyLoaded,
 	logStrategyRuntimeMetadata,
 	logTimeframeFingerprint,
-	logTradePlan,
-	maybeHandleForcedExit,
-	maybeHandleTrailingStop,
 	runtimeLogger,
-	snapshotPaperAccount,
 	ExecutionHook,
-	withRuntimeFingerprints,
 } from "../runtimeShared";
 import type { StrategyDecisionContext, TraderStrategy } from "../types";
 import { WarmupMap } from "../runtimeFactory";
@@ -66,6 +52,7 @@ import {
 } from "./backtestTypes";
 import { buildRuntimeFingerprintLogPayload } from "../runtimeFingerprint";
 import type { ExecutionProvider } from "../execution/executionProvider";
+import { runTick } from "../loop/runTick";
 
 class BacktestExecutionProvider implements ExecutionProvider {
 	readonly venue = "backtest";
@@ -328,124 +315,29 @@ export const runBacktest = async (
 			continue;
 		}
 
-		const positionState = executionProvider.getPosition(symbol);
-		const unrealizedPnl = calculateUnrealizedPnl(positionState, candle.close);
-		const prePlanSnapshot = executionProvider.snapshotAccount(unrealizedPnl);
-		const accountEquity = prePlanSnapshot?.equity ?? fallbackEquity;
-
-		const recordHook = createExecutionRecorder(trades, candle, positionState);
-
-		const forcedExitHandled = await maybeHandleForcedExit(
-			positionState,
+		const recordHook = createExecutionRecorder(
+			trades,
 			candle,
-			riskManager,
-			executionProvider,
-			accountEquity,
-			recordHook,
-			runtimeFingerprints
+			executionProvider.getPosition(symbol)
 		);
-		if (forcedExitHandled) {
-			const accountSnapshot = logAndSnapshotPosition(
-				executionProvider,
-				symbol,
-				candle.close,
-				candle.timestamp
-			);
-			if (accountSnapshot) {
-				fallbackEquity = accountSnapshot.equity;
-				equitySnapshots.push(accountSnapshot);
-			}
-			continue;
-		}
 
-		const trailingExitHandled = await maybeHandleTrailingStop(
-			symbol,
-			positionState,
+		const tickResult = await runTick({
 			candle,
+			buffer,
+			strategy,
 			riskManager,
+			riskConfig: agenaiConfig.risk,
 			executionProvider,
-			accountEquity,
-			agenaiConfig.risk,
-			recordHook,
-			runtimeFingerprints
-		);
-		if (trailingExitHandled) {
-			const accountSnapshot = logAndSnapshotPosition(
-				executionProvider,
-				symbol,
-				candle.close,
-				candle.timestamp
-			);
-			if (accountSnapshot) {
-				fallbackEquity = accountSnapshot.equity;
-				equitySnapshots.push(accountSnapshot);
-			}
-			continue;
-		}
-
-		const intent = enrichIntentMetadata(
-			await strategy.decide(buffer, positionState.side, decisionContext)
-		);
-		const fingerprintedIntent = withRuntimeFingerprints(
-			intent,
-			runtimeFingerprints
-		);
-		logStrategyDecision(candle, fingerprintedIntent, runtimeFingerprints);
-
-		const plan = riskManager.plan(
-			fingerprintedIntent,
-			candle.close,
-			accountEquity,
-			positionState
-		);
-
-		if (!plan) {
-			if (fingerprintedIntent.intent !== "NO_ACTION") {
-				const reason =
-					fingerprintedIntent.intent === "CLOSE_LONG" ||
-					fingerprintedIntent.intent === "CLOSE_SHORT"
-						? "no_position_to_close"
-						: "risk_plan_rejected";
-				logExecutionSkipped(fingerprintedIntent, positionState.side, reason);
-			}
-		} else {
-			const skipReason = getPreExecutionSkipReason(plan, positionState);
-			if (skipReason) {
-				logExecutionSkipped(plan, positionState.side, skipReason);
-			} else {
-				logTradePlan(plan, candle, fingerprintedIntent);
-				try {
-					const result = await executionProvider.execute(plan, {
-						price: candle.close,
-					});
-					if (result.status === "skipped") {
-						logExecutionSkipped(
-							plan,
-							positionState.side,
-							result.reason ?? "execution_engine_skip"
-						);
-					} else {
-						logExecutionResult(result);
-						recordTrade(trades, plan, result, candle, positionState);
-					}
-				} catch (error) {
-					logExecutionError(error, plan);
-				}
-			}
-		}
-
-		const latestPosition = executionProvider.getPosition(symbol);
-		logPaperPosition(symbol, latestPosition);
-
-		const accountSnapshot = snapshotPaperAccount(
-			executionProvider,
-			calculateUnrealizedPnl(latestPosition, candle.close),
 			symbol,
-			candle.timestamp
-		);
-		if (accountSnapshot) {
-			fallbackEquity = accountSnapshot.equity;
-			equitySnapshots.push(accountSnapshot);
+			accountEquityFallback: fallbackEquity,
+			decisionContext,
+			fingerprints: runtimeFingerprints,
+			recordHook,
+		});
+
+		fallbackEquity = tickResult.updatedEquity;
+		if (tickResult.accountSnapshot) {
+			equitySnapshots.push(tickResult.accountSnapshot);
 		}
 	}
 

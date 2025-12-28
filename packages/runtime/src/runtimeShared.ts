@@ -27,6 +27,14 @@ export type ExecutionHook = (
 	candle: Candle
 ) => void;
 
+export interface GuardedExitResult {
+	handled: boolean;
+	intent?: TradeIntent;
+	plan?: TradePlan | null;
+	executionResult?: ExecutionResult | null;
+	skipReason?: string;
+}
+
 export type StrategySource = "override" | "builder";
 
 export interface StrategyLogContext {
@@ -480,9 +488,9 @@ export const maybeHandleForcedExit = async (
 	accountEquity: number,
 	onExecuted?: ExecutionHook,
 	fingerprints?: StrategyRuntimeFingerprints
-): Promise<boolean> => {
+): Promise<GuardedExitResult> => {
 	if (positionState.side === "FLAT" || positionState.size <= 0) {
-		return false;
+		return { handled: false };
 	}
 
 	const stopLossPrice = positionState.stopLossPrice;
@@ -500,7 +508,7 @@ export const maybeHandleForcedExit = async (
 			: lastCandle.low <= takeProfitPrice);
 
 	if (!hitSL && !hitTP) {
-		return false;
+		return { handled: false };
 	}
 
 	const reasonBase = hitSL ? "stop_loss_hit" : "take_profit_hit";
@@ -535,35 +543,57 @@ export const maybeHandleForcedExit = async (
 			positionState.side,
 			"forced_exit_plan_rejected"
 		);
-		return true;
+		return {
+			handled: true,
+			intent: fingerprintedIntent,
+			plan: null,
+			skipReason: "forced_exit_plan_rejected",
+		};
 	}
 
 	const skipReason = getPreExecutionSkipReason(plan, positionState);
 	if (skipReason) {
 		logExecutionSkipped(plan, positionState.side, skipReason);
-		return true;
+		return {
+			handled: true,
+			intent: fingerprintedIntent,
+			plan,
+			skipReason,
+		};
 	}
 
 	logTradePlan(plan, lastCandle, fingerprintedIntent);
+	let executionResult: ExecutionResult | null = null;
 	try {
-		const result = await executionProvider.execute(plan, {
+		executionResult = await executionProvider.execute(plan, {
 			price: lastCandle.close,
 		});
-		if (result.status === "skipped") {
+		if (executionResult.status === "skipped") {
 			logExecutionSkipped(
 				plan,
 				positionState.side,
-				result.reason ?? "execution_engine_skip"
+				executionResult.reason ?? "execution_engine_skip"
 			);
-		} else {
-			logExecutionResult(result);
-			onExecuted?.(plan, result, lastCandle);
+			return {
+				handled: true,
+				intent: fingerprintedIntent,
+				plan,
+				executionResult,
+				skipReason: executionResult.reason ?? "execution_engine_skip",
+			};
 		}
+		logExecutionResult(executionResult);
+		onExecuted?.(plan, executionResult, lastCandle);
 	} catch (error) {
 		logExecutionError(error, plan);
 	}
 
-	return true;
+	return {
+		handled: true,
+		intent: fingerprintedIntent,
+		plan,
+		executionResult,
+	};
 };
 
 export const maybeHandleTrailingStop = async (
@@ -576,9 +606,9 @@ export const maybeHandleTrailingStop = async (
 	riskConfig: RiskConfig,
 	onExecuted?: ExecutionHook,
 	fingerprints?: StrategyRuntimeFingerprints
-): Promise<boolean> => {
+): Promise<GuardedExitResult> => {
 	if (positionState.side === "FLAT" || positionState.size <= 0) {
-		return false;
+		return { handled: false };
 	}
 
 	const entryPrice =
@@ -586,13 +616,13 @@ export const maybeHandleTrailingStop = async (
 			? positionState.entryPrice
 			: (positionState.avgEntryPrice ?? 0);
 	if (entryPrice <= 0) {
-		return false;
+		return { handled: false };
 	}
 
 	const activationPct = Math.max(riskConfig.trailingActivationPct ?? 0, 0);
 	const trailPct = Math.max(riskConfig.trailingTrailPct ?? 0, 0);
 	if (trailPct <= 0) {
-		return false;
+		return { handled: false };
 	}
 	const isLong = positionState.side === "LONG";
 
@@ -623,7 +653,7 @@ export const maybeHandleTrailingStop = async (
 		if (Object.keys(updates).length) {
 			executionProvider.updatePosition(symbol, updates);
 		}
-		return false;
+		return { handled: false };
 	}
 
 	let proposedTrailing = trailingStopPrice;
@@ -658,7 +688,7 @@ export const maybeHandleTrailingStop = async (
 		? lastCandle.low <= trailingStopPrice
 		: lastCandle.high >= trailingStopPrice;
 	if (!stopStillValid || !stopTriggered) {
-		return false;
+		return { handled: false };
 	}
 
 	const reason = isLong ? "trailing_stop_hit" : "short_trailing_stop_hit";
@@ -692,33 +722,55 @@ export const maybeHandleTrailingStop = async (
 			positionState.side,
 			"trailing_exit_plan_rejected"
 		);
-		return true;
+		return {
+			handled: true,
+			intent: fingerprintedIntent,
+			plan: null,
+			skipReason: "trailing_exit_plan_rejected",
+		};
 	}
 
 	const skipReason = getPreExecutionSkipReason(plan, positionState);
 	if (skipReason) {
 		logExecutionSkipped(plan, positionState.side, skipReason);
-		return true;
+		return {
+			handled: true,
+			intent: fingerprintedIntent,
+			plan,
+			skipReason,
+		};
 	}
 
 	logTradePlan(plan, lastCandle, fingerprintedIntent);
+	let executionResult: ExecutionResult | null = null;
 	try {
-		const result = await executionProvider.execute(plan, {
+		executionResult = await executionProvider.execute(plan, {
 			price: lastCandle.close,
 		});
-		if (result.status === "skipped") {
+		if (executionResult.status === "skipped") {
 			logExecutionSkipped(
 				plan,
 				positionState.side,
-				result.reason ?? "execution_engine_skip"
+				executionResult.reason ?? "execution_engine_skip"
 			);
-		} else {
-			logExecutionResult(result);
-			onExecuted?.(plan, result, lastCandle);
+			return {
+				handled: true,
+				intent: fingerprintedIntent,
+				plan,
+				executionResult,
+				skipReason: executionResult.reason ?? "execution_engine_skip",
+			};
 		}
+		logExecutionResult(executionResult);
+		onExecuted?.(plan, executionResult, lastCandle);
 	} catch (error) {
 		logExecutionError(error, plan);
 	}
 
-	return true;
+	return {
+		handled: true,
+		intent: fingerprintedIntent,
+		plan,
+		executionResult,
+	};
 };

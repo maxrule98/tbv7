@@ -11,27 +11,14 @@ import { resolveStrategyBuilder } from "./strategyBuilders";
 import {
 	StrategyRuntimeMode,
 	StrategySource,
-	calculateUnrealizedPnl,
-	enrichIntentMetadata,
-	getPreExecutionSkipReason,
-	logAndSnapshotPosition,
-	logExecutionError,
-	logExecutionResult,
-	logExecutionSkipped,
 	logMarketDataError,
-	logPaperPosition,
 	logRiskConfig,
-	logStrategyDecision,
 	logStrategyLoaded,
 	logStrategyRuntimeMetadata,
 	logTimeframeFingerprint,
-	logTradePlan,
-	maybeHandleForcedExit,
-	maybeHandleTrailingStop,
 	runtimeLogger,
-	snapshotPaperAccount,
-	withRuntimeFingerprints,
 } from "./runtimeShared";
+import { runTick } from "./loop/runTick";
 import type { StrategyRuntimeBuilder } from "./runtimeFactory";
 import type { StrategyDecisionContext, TraderStrategy } from "./types";
 import type { LoadedRuntimeConfig, VenueSelection } from "./loadRuntimeConfig";
@@ -384,7 +371,7 @@ const startClosedCandleRuntime = async (
 				latestTimestamp: event.candle.timestamp,
 				lastLoggedByTimeframe: lastFingerprintByTimeframe,
 			});
-			fallbackEquity = await processExecutionCandle({
+			const tickResult = await runTick({
 				candle: event.candle,
 				buffer,
 				strategy: options.strategy,
@@ -393,11 +380,10 @@ const startClosedCandleRuntime = async (
 				executionProvider: options.executionProvider,
 				symbol: options.instrument.symbol,
 				accountEquityFallback: fallbackEquity,
-				mode: options.mode,
+				decisionContext: createDecisionContext(event, options.venues),
 				fingerprints: options.fingerprints,
-				venues: options.venues,
-				event,
 			});
+			fallbackEquity = tickResult.updatedEquity;
 		}
 	};
 
@@ -472,152 +458,6 @@ const logClosedCandleEvent = (event: ClosedCandleEvent): void => {
 		source: event.source,
 		arrivalDelayMs: event.arrivalDelayMs,
 	});
-};
-
-interface ExecutionCandleContext {
-	candle: Candle;
-	buffer: Candle[];
-	strategy: TraderStrategy;
-	riskManager: RiskManager;
-	riskConfig: RiskConfig;
-	executionProvider: ExecutionProvider;
-	symbol: string;
-	accountEquityFallback: number;
-	mode: StrategyRuntimeMode;
-	fingerprints: StrategyRuntimeFingerprints;
-	venues: VenueSelection;
-	event: ClosedCandleEvent;
-}
-
-const processExecutionCandle = async (
-	context: ExecutionCandleContext
-): Promise<number> => {
-	let fallbackEquity = context.accountEquityFallback;
-	const positionState = context.executionProvider.getPosition(context.symbol);
-	const unrealizedPnl = calculateUnrealizedPnl(
-		positionState,
-		context.candle.close
-	);
-	const prePlanSnapshot =
-		context.executionProvider.snapshotAccount(unrealizedPnl);
-	const accountEquity = prePlanSnapshot?.equity ?? fallbackEquity;
-
-	const forcedExitHandled = await maybeHandleForcedExit(
-		positionState,
-		context.candle,
-		context.riskManager,
-		context.executionProvider,
-		accountEquity,
-		undefined,
-		context.fingerprints
-	);
-	if (forcedExitHandled) {
-		const accountSnapshot = logAndSnapshotPosition(
-			context.executionProvider,
-			context.symbol,
-			context.candle.close,
-			context.candle.timestamp
-		);
-		if (accountSnapshot) {
-			fallbackEquity = accountSnapshot.equity;
-		}
-		return fallbackEquity;
-	}
-
-	const trailingExitHandled = await maybeHandleTrailingStop(
-		context.symbol,
-		positionState,
-		context.candle,
-		context.riskManager,
-		context.executionProvider,
-		accountEquity,
-		context.riskConfig,
-		undefined,
-		context.fingerprints
-	);
-	if (trailingExitHandled) {
-		const accountSnapshot = logAndSnapshotPosition(
-			context.executionProvider,
-			context.symbol,
-			context.candle.close,
-			context.candle.timestamp
-		);
-		if (accountSnapshot) {
-			fallbackEquity = accountSnapshot.equity;
-		}
-		return fallbackEquity;
-	}
-
-	const decisionContext = createDecisionContext(context.event, context.venues);
-	const intent = enrichIntentMetadata(
-		await context.strategy.decide(
-			context.buffer,
-			positionState.side,
-			decisionContext
-		)
-	);
-	const fingerprintedIntent = withRuntimeFingerprints(
-		intent,
-		context.fingerprints
-	);
-	logStrategyDecision(
-		context.candle,
-		fingerprintedIntent,
-		context.fingerprints
-	);
-
-	const plan = context.riskManager.plan(
-		fingerprintedIntent,
-		context.candle.close,
-		accountEquity,
-		positionState
-	);
-	if (!plan) {
-		if (fingerprintedIntent.intent !== "NO_ACTION") {
-			const reason =
-				fingerprintedIntent.intent === "CLOSE_LONG" ||
-				fingerprintedIntent.intent === "CLOSE_SHORT"
-					? "no_position_to_close"
-					: "risk_plan_rejected";
-			logExecutionSkipped(fingerprintedIntent, positionState.side, reason);
-		}
-	} else {
-		const skipReason = getPreExecutionSkipReason(plan, positionState);
-		if (skipReason) {
-			logExecutionSkipped(plan, positionState.side, skipReason);
-		} else {
-			logTradePlan(plan, context.candle, fingerprintedIntent);
-			try {
-				const result = await context.executionProvider.execute(plan, {
-					price: context.candle.close,
-				});
-				if (result.status === "skipped") {
-					logExecutionSkipped(
-						plan,
-						positionState.side,
-						result.reason ?? "execution_engine_skip"
-					);
-				} else {
-					logExecutionResult(result);
-				}
-			} catch (error) {
-				logExecutionError(error, plan);
-			}
-		}
-	}
-
-	const latestPosition = context.executionProvider.getPosition(context.symbol);
-	logPaperPosition(context.symbol, latestPosition);
-	const accountSnapshot = snapshotPaperAccount(
-		context.executionProvider,
-		calculateUnrealizedPnl(latestPosition, context.candle.close),
-		context.symbol,
-		context.candle.timestamp
-	);
-	if (accountSnapshot) {
-		fallbackEquity = accountSnapshot.equity;
-	}
-	return fallbackEquity;
 };
 
 const createDecisionContext = (
