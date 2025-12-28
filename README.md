@@ -30,79 +30,108 @@ This repository starts fresh at **v1**, representing the final architecture alig
 ```
 agenai-trader/
   config/
-    exchange/
-    strategies/
-    risk/
+    account/          # Paper/live account configs
+    exchange/         # Exchange-specific settings
+    strategies/       # Strategy JSON configurations
+    risk/             # Risk management profiles
 
   apps/
-    trader-cli/
-    backtester-cli/
-    dashboard/
+    trader-cli/       # CLI for live trading
+    trader-server/    # HTTP server for live trading
+    backtest-cli/     # CLI for backtesting
+    dashboard/        # (Future) UI dashboard
+    app-di/           # Shared dependency injection layer
 
   packages/
-    core/
-    exchange-mexc/
-    indicators/
-    models-quant/
-    strategy-engine/
-    risk-engine/
-    execution-engine/
-    persistence/
-    backtest-core/
+    core/             # Core types, strategies, config
+    data/             # Historical data provider
+    runtime/          # Unified runtime (live + backtest)
+    exchange-mexc/    # MEXC exchange adapter
+    exchange-binance/ # Binance exchange adapters
+    indicators/       # Pure indicator functions
+    models-quant/     # Forecasting models
+    strategy-engine/  # Strategy orchestration
+    risk-engine/      # Position sizing & risk mgmt
+    execution-engine/ # Order execution (paper/live)
+    metrics/          # Backtest performance analytics
+    persistence/      # (Future) Trade logging
 ```
 
-Each package is isolated and reusable, following clean modular design.
+Each package is isolated and reusable, following clean modular design with strict import boundaries.
 
 ---
 
 ## 🧠 System Architecture
 
-### **1. Market Data**
+### **Core Principles**
 
-- MEXC REST/WS swaps (candles/trades)
-- REST fallback
-- In-memory OHLCV cache
+- **Runtime Parity**: Live trading and backtesting share identical tick pipeline via `@agenai/runtime`
+- **Import Boundaries**: No exchange imports in runtime; data flows through provider abstractions
+- **Dependency Injection**: Apps use `@agenai/app-di` for consistent service wiring
+- **Closed-Candle Policy**: Strategies only execute on completed candles
+ 
+### **1. Market Data Layer**
 
-### **2. Indicators**
+- **Exchange Adapters** (`@agenai/exchange-mexc`, `@agenai/exchange-binance`)
+  - Wrap CCXT for REST API access
+  - Fetch OHLCV via `fetchOHLCV()`
+- **Data Providers** (`@agenai/data`)
+  - `DefaultDataProvider`: Historical data loading with pagination
+  - `loadHistoricalSeries()`: Multi-timeframe concurrent fetching
+- **Market Data Providers** (`@agenai/runtime/marketData`)
+  - `PollingMarketDataProvider`: REST polling for live data
+  - `BinanceUsdMMarketDataProvider`: WebSocket streams + REST bootstrap
+  - Both provide `bootstrap()` and `createFeed()` APIs
 
-- EMA, MACD, RSI, ATR (pure functions)
-- All deterministic and testable
+### **2. Indicators & Models**
 
-### **3. Forecasting Models**
+- **Indicators** (`@agenai/indicators`)
+  - Pure functions: EMA, MACD, RSI, ATR, VWAP, etc.
+  - Deterministic and fully testable
+- **Forecasting Models** (`@agenai/models-quant`)
+  - AR(4) autoregression
+  - MACD histogram forecast
+  - Error-correction regression
 
-- AR(4) fast JS implementation
-- MACD histogram forecast
-- Error-correction regression
+### **3. Strategy Layer**
 
-### **4. Strategy Engine**
+- **Strategy Registry** (`@agenai/core/strategies`)
+  - Auto-discovers strategies from filesystem
+  - Validates unique IDs and required fields
+  - Powers `pnpm strategy:list`
+- **Strategy Engine** (`@agenai/strategy-engine`)
+  - Orchestrates indicator → model → decision pipeline
+  - Produces trade intents: `OPEN_LONG`, `CLOSE_LONG`, `OPEN_SHORT`, `CLOSE_SHORT`, `NO_ACTION`
 
-Consumes:
+### **4. Risk & Execution**
 
-- Candle windows
-- Indicators
-- Forecasts
-- Config thresholds
+- **Risk Engine** (`@agenai/risk-engine`)
+  - Position sizing via risk-per-trade %
+  - Stop-loss / take-profit calculation
+  - Validates against max leverage & position limits
+- **Execution Engine** (`@agenai/execution-engine`)
+  - Paper mode: In-memory position tracking with PnL simulation
+  - Live mode: CCXT order submission
+  - Trailing stop logic with activation thresholds
 
-Produces:
+### **5. Unified Runtime**
 
-- `OPEN_LONG`
-- `CLOSE_LONG`
-- `OPEN_SHORT`
-- `CLOSE_SHORT`
-- `NO_ACTION`
+- **Runtime Package** (`@agenai/runtime`)
+  - `runTick()`: Canonical tick pipeline (position checks → exits → strategy → risk → execute)
+  - `startTrader()`: Live trading loop with feed subscription
+  - `backtestRunner()`: Replay historical candles through same pipeline
+  - Both modes use identical logging, fingerprinting, and decision logic
+- **Runtime Snapshot** (`createRuntimeSnapshot()`)
+  - Resolves configs once: strategy, risk, account, exchange
+  - Generates fingerprints for reproducibility
+  - Tracks metadata for parity verification
 
-### **5. Risk Engine**
+### **6. Metrics & Analytics**
 
-- Max leverage
-- Max positions
-- Risk per trade %
-- SL/TP sizing
-
-### **6. Execution Engine**
-
-- Converts trade plan → CCXT orders (MEXC linear swaps)
-- Paper mode simulator and live order relay
-- Rate-limit safe logic
+- **Metrics Engine** (`@agenai/metrics`)
+  - Post-backtest analysis: Sharpe, Sortino, max drawdown, R-multiples
+  - Trade-level CSV exports with session grouping
+  - Win/loss/breakeven statistics
 
 ---
 
@@ -294,29 +323,81 @@ Quick reference for the unified workspace scripts:
 ## 🧭 Live Trading Flow
 
 ```
-Market Data
-   → Indicators
-      → Forecast Models
-         → Strategy Engine
-            → Intent
-               → Risk Engine
-                  → Execution Engine
-                     → Exchange
+Market Data Provider (WebSocket/Polling)
+   ↓ (closed candle event)
+runTick() Pipeline:
+   1. Get Position & Calculate Unrealized PnL
+   2. Check Forced Exits (SL/TP/Trailing Stop)
+   3. Strategy.decide() → Trade Intent
+   4. Risk Manager → Trade Plan
+   5. Execution Provider → Order/Fill
+   6. Snapshot Account State
+   7. Log Metrics & Diagnostics
+   ↓
+Persist Trade Records (optional)
 ```
+
+### Backtest Flow (Same Pipeline)
+
+```
+Historical Candles (from @agenai/data)
+   ↓ (replay each candle)
+runTick() Pipeline (identical to live)
+   ↓
+Metrics Engine Analysis
+```
+
+Both modes execute the **same `runTick()` function** ensuring deterministic parity.
 
 ---
 
-## 🤖 AI Coding Agent Rules
+## � Testing & Quality
 
-If an AI assistant (Codex/GPT) is contributing:
+### Test Structure
 
-1. Keep all code **modular**
-2. Never hardcode config—use `/config`
-3. Indicators + models must be **pure functions**
-4. Exchange access must go through `exchange-mexc`
-5. No circular imports
-6. Live + backtest must share strategy code
-7. Update the README if architecture changes
+- **Unit Tests**: Each package has `*.test.ts` files using Vitest
+- **Parity Tests**: `runtime/src/runtimeParity.test.ts` verifies live/backtest produce identical intents
+- **Import Boundary Tests**: `runtime/src/__tests__/import-boundary.test.ts` enforces no exchange imports in runtime
+
+### Running Tests
+
+```bash
+# Run all tests
+pnpm test
+
+# Run tests for specific package
+pnpm --filter @agenai/runtime test
+
+# Watch mode for development
+pnpm --filter @agenai/core test --watch
+```
+
+### Import Boundaries
+
+Strict rules enforced by tests:
+
+- `@agenai/runtime` **MUST NOT** import from exchange packages
+- Data flows through `ExchangeAdapter` → `DataProvider` → `MarketDataProvider` abstractions
+- Prevents tight coupling and enables runtime flexibility
+
+---
+
+## 🤖 AI Coding Assistant Guidelines
+
+When contributing to this codebase:
+
+1. **Modularity First**: Keep packages isolated with clear interfaces
+2. **Config-Driven**: Never hardcode—use `/config` JSON files
+3. **Pure Functions**: Indicators and models must be deterministic
+4. **Type Safety**: Leverage TypeScript strictly; avoid `any`
+5. **Abstraction Layers**: Exchange access through `ExchangeAdapter`, no direct CCXT in runtime
+6. **No Circular Imports**: Use dependency injection via `@agenai/app-di`
+7. **Runtime Parity**: Live and backtest share `runTick()` pipeline
+8. **Test Coverage**: Add tests for new features; verify parity invariants
+9. **Import Boundaries**: Respect layer separation (see tests)
+10. **Documentation**: Update README/CONTRIBUTING for architectural changes
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed development workflows.
 
 ---
 
