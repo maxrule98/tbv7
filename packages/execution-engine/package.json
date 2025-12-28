@@ -5,7 +5,6 @@
 	"types": "dist/index.d.ts",
 	"dependencies": {
 		"@agenai/core": "workspace:*",
-		"@agenai/exchange-mexc": "workspace:*",
 		"@agenai/risk-engine": "workspace:*"
 	},
 	"scripts": {

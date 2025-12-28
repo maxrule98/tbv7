@@ -13,6 +13,11 @@ import {
 	runBacktest,
 	type RuntimeProfileMetadata,
 } from "@agenai/runtime";
+import {
+	createDataProvider,
+	createExchangeAdapter,
+	createMarketDataClient,
+} from "@agenai/app-di";
 import { parseCliArgs } from "./cliArgs";
 
 type BacktestResultPayload = Awaited<ReturnType<typeof runBacktest>>;
@@ -179,6 +184,10 @@ const main = async (): Promise<void> => {
 		maxCandlesOverride: maxCandles,
 	});
 
+	const exchangeAdapter = createExchangeAdapter(runtimeSnapshot);
+	const marketDataClient = createMarketDataClient(exchangeAdapter);
+	const dataProvider = createDataProvider(runtimeSnapshot, exchangeAdapter);
+
 	const strategyConfig = runtimeSnapshot.config.strategyConfig;
 	const snapshotParams = runtimeSnapshot.metadata.runtimeParams;
 	const symbol = snapshotParams.symbol;
@@ -199,6 +208,9 @@ const main = async (): Promise<void> => {
 	);
 	const result = await runBacktest(backtestConfig, {
 		runtimeSnapshot,
+		client: exchangeAdapter,
+		marketDataClient,
+		dataProvider,
 	});
 
 	const executions = result.trades.length;

@@ -1,7 +1,6 @@
 import WebSocket from "ws";
-import { Candle } from "@agenai/core";
+import { Candle, ExchangeAdapter } from "@agenai/core";
 import { timeframeToMs } from "@agenai/data";
-import { BinanceUsdMClient } from "@agenai/exchange-binance";
 import { runtimeLogger } from "../runtimeShared";
 import { normalizeSymbolForVenue, toCanonicalSymbol } from "../symbols";
 import {
@@ -26,7 +25,7 @@ const MIN_WS_HEALTH_MS = 10_000;
 export class BinanceUsdMMarketDataProvider implements MarketDataProvider {
 	readonly venue = "binance";
 
-	constructor(private readonly client = new BinanceUsdMClient()) {}
+	constructor(private readonly client: ExchangeAdapter) {}
 
 	async bootstrap(
 		request: MarketDataBootstrapRequest

@@ -3,10 +3,10 @@ import type {
 	AccountConfig,
 	AgenaiConfig,
 	Candle,
+	ExchangeAdapter,
 	StrategyConfig,
 	TradeIntent,
 } from "@agenai/core";
-import type { MexcClient } from "@agenai/exchange-mexc";
 import { runBacktest } from "./backtestRunner";
 import type { BacktestConfig } from "./backtestTypes";
 import type { TraderStrategy } from "../types";
@@ -151,7 +151,7 @@ const accountConfig: AccountConfig = { startingBalance: defaultInitialBalance };
 const createMockClient = () =>
 	({
 		fetchOHLCV: vi.fn(),
-	}) as unknown as MexcClient;
+	}) as unknown as ExchangeAdapter;
 
 describe("runBacktest", () => {
 	it("replays provided candle data with a scripted strategy", async () => {

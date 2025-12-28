@@ -6,6 +6,11 @@ import {
 	parseStrategyArg,
 	startTrader,
 } from "@agenai/runtime";
+import {
+	createExchangeAdapter,
+	createExecutionProvider,
+	createMarketDataProvider,
+} from "@agenai/app-di";
 
 const logger = createLogger("trader-server");
 
@@ -35,6 +40,18 @@ const main = async (): Promise<void> => {
 	const symbol = runtimeParams.symbol;
 	const timeframe = runtimeParams.executionTimeframe;
 	const exchange = runtimeBootstrap.agenaiConfig.exchange;
+	const pollInterval = 10_000;
+
+	const exchangeAdapter = createExchangeAdapter(runtimeSnapshot);
+	const marketDataProvider = createMarketDataProvider(
+		runtimeSnapshot,
+		exchangeAdapter,
+		pollInterval
+	);
+	const executionProvider = createExecutionProvider(
+		runtimeSnapshot,
+		exchangeAdapter
+	);
 
 	startTrader(
 		{
@@ -44,7 +61,7 @@ const main = async (): Promise<void> => {
 			executionMode: runtimeBootstrap.agenaiConfig.env.executionMode,
 			strategyId: runtimeBootstrap.strategyId,
 		},
-		{ runtimeSnapshot }
+		{ runtimeSnapshot, marketDataProvider, executionProvider }
 	).catch((error) => {
 		logger.error("runtime_failed", {
 			message: error instanceof Error ? error.message : String(error),

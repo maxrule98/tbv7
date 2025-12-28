@@ -1,10 +1,9 @@
-import { Candle } from "@agenai/core";
+import { Candle, ExchangeAdapter } from "@agenai/core";
 import {
 	DefaultDataProvider,
 	LiveSubscription,
 	timeframeToMs,
 } from "@agenai/data";
-import { MexcClient } from "@agenai/exchange-mexc";
 import { runtimeLogger } from "../runtimeShared";
 import {
 	ClosedCandleEvent,
@@ -23,7 +22,7 @@ export class PollingMarketDataProvider implements MarketDataProvider {
 	private readonly dataProvider: DefaultDataProvider;
 
 	constructor(
-		private readonly client: MexcClient,
+		private readonly client: ExchangeAdapter,
 		options: { pollIntervalMs?: number; venue?: string } = {}
 	) {
 		this.venue = options.venue ?? "mexc";

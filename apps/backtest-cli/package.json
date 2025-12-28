@@ -11,7 +11,13 @@
 		"test": "vitest run --passWithNoTests"
 	},
 	"dependencies": {
+		"@agenai/app-di": "workspace:*",
 		"@agenai/core": "workspace:*",
-		"@agenai/runtime": "workspace:*"
+		"@agenai/runtime": "workspace:*",
+		"@agenai/exchange-mexc": "workspace:*",
+		"@agenai/exchange-binance": "workspace:*",
+		"@agenai/data": "workspace:*",
+		"@agenai/execution-engine": "workspace:*",
+		"@agenai/risk-engine": "workspace:*"
 	}
 }

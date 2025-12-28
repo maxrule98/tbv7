@@ -4,6 +4,11 @@ import {
 	loadRuntimeConfig,
 	startTrader,
 } from "@agenai/runtime";
+import {
+	createExchangeAdapter,
+	createExecutionProvider,
+	createMarketDataProvider,
+} from "@agenai/app-di";
 
 const logger = createLogger("trader-cli");
 
@@ -47,6 +52,17 @@ const main = async (): Promise<void> => {
 		executionTimeframe: runtimeBootstrap.venues.executionTimeframe,
 	});
 
+	const exchangeAdapter = createExchangeAdapter(runtimeSnapshot);
+	const marketDataProvider = createMarketDataProvider(
+		runtimeSnapshot,
+		exchangeAdapter,
+		10_000
+	);
+	const executionProvider = createExecutionProvider(
+		runtimeSnapshot,
+		exchangeAdapter
+	);
+
 	await startTrader(
 		{
 			symbol,
@@ -55,7 +71,7 @@ const main = async (): Promise<void> => {
 			executionMode: runtimeBootstrap.agenaiConfig.env.executionMode,
 			strategyId: resolvedStrategyId,
 		},
-		{ runtimeSnapshot }
+		{ runtimeSnapshot, marketDataProvider, executionProvider }
 	);
 };
 

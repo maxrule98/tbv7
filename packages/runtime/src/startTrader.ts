@@ -6,7 +6,6 @@ import {
 	RiskConfig,
 	StrategyId,
 } from "@agenai/core";
-import { MexcClient } from "@agenai/exchange-mexc";
 import { RiskManager } from "@agenai/risk-engine";
 import { resolveStrategyBuilder } from "./strategyBuilders";
 import {
@@ -43,16 +42,8 @@ import {
 } from "./runtimeSnapshot";
 import { buildRuntimeFingerprintLogPayload } from "./runtimeFingerprint";
 import type { StrategyRuntimeFingerprints } from "./fingerprints";
-import {
-	BinanceUsdMMarketDataProvider,
-	PollingMarketDataProvider,
-	type ClosedCandleEvent,
-	type MarketDataProvider,
-} from "./marketData";
-import {
-	MexcExecutionProvider,
-	type ExecutionProvider,
-} from "./execution/executionProvider";
+import { type ClosedCandleEvent, type MarketDataProvider } from "./marketData";
+import { type ExecutionProvider } from "./execution/executionProvider";
 export type { TraderStrategy } from "./types";
 
 export const DEFAULT_POLL_INTERVAL_MS = 10_000;
@@ -132,22 +123,19 @@ export const startTrader = async (
 		traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 	const profileMetadata = runtimeBootstrap.profiles;
 
-	const client = new MexcClient({
-		apiKey: agenaiConfig.exchange.credentials.apiKey,
-		secret: agenaiConfig.exchange.credentials.apiSecret,
-		useFutures: true,
-	});
+	if (!options.marketDataProvider) {
+		throw new Error(
+			"marketDataProvider is required. Inject an adapter from the app layer."
+		);
+	}
+	if (!options.executionProvider) {
+		throw new Error(
+			"executionProvider is required. Inject an adapter from the app layer."
+		);
+	}
 
-	const marketDataProvider =
-		options.marketDataProvider ??
-		createMarketDataProvider(venues.signalVenue, client, pollIntervalMs);
-	const executionProvider =
-		options.executionProvider ??
-		new MexcExecutionProvider({
-			client,
-			mode: executionMode,
-			accountConfig,
-		});
+	const marketDataProvider = options.marketDataProvider;
+	const executionProvider = options.executionProvider;
 
 	const effectiveBuilder =
 		options.strategyBuilder ??
@@ -641,21 +629,3 @@ const createDecisionContext = (
 	timeframe: event.timeframe,
 	isClosed: true,
 });
-
-const createMarketDataProvider = (
-	venue: string,
-	client: MexcClient,
-	pollIntervalMs: number
-): MarketDataProvider => {
-	switch (venue.toLowerCase()) {
-		case "binance":
-		case "binance-usdm":
-		case "binance_usdm":
-			return new BinanceUsdMMarketDataProvider();
-		default:
-			return new PollingMarketDataProvider(client, {
-				pollIntervalMs,
-				venue,
-			});
-	}
-};

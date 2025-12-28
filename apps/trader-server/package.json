@@ -6,10 +6,17 @@
 	"types": "dist/index.d.ts",
 	"scripts": {
 		"build": "tsc -p tsconfig.json",
-		"start": "node dist/index.js"
+		"start": "node dist/index.js",
+		"test": "vitest run --passWithNoTests"
 	},
 	"dependencies": {
+		"@agenai/app-di": "workspace:*",
 		"@agenai/core": "workspace:*",
-		"@agenai/runtime": "workspace:*"
+		"@agenai/runtime": "workspace:*",
+		"@agenai/exchange-mexc": "workspace:*",
+		"@agenai/exchange-binance": "workspace:*"
+	},
+	"devDependencies": {
+		"vitest": "^1.6.1"
 	}
 }

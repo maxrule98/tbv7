@@ -3,6 +3,7 @@ import {
 	AccountConfig,
 	AgenaiConfig,
 	Candle,
+	ExchangeAdapter,
 	PositionSide,
 	StrategyConfig,
 	StrategyId,
@@ -16,8 +17,6 @@ import {
 	type MarketDataClient,
 	type TimeframeSeries,
 } from "@agenai/data";
-import { BinanceUsdMClient } from "@agenai/exchange-binance";
-import { MexcClient } from "@agenai/exchange-mexc";
 import {
 	ExecutionEngine,
 	ExecutionResult,
@@ -109,7 +108,7 @@ export interface RunBacktestOptions {
 	strategyProfile?: string;
 	riskProfile?: string;
 	strategyOverride?: TraderStrategy;
-	client?: MexcClient;
+	client?: ExchangeAdapter;
 	dataProvider?: DataProvider;
 	marketDataClient?: MarketDataClient;
 	timeframeData?: Record<string, Candle[]>;
@@ -171,20 +170,27 @@ export const runBacktest = async (
 
 	const accountConfig = runtimeBootstrap.accountConfig;
 
-	const client =
-		options.client ??
-		new MexcClient({
-			apiKey: agenaiConfig.exchange.credentials.apiKey,
-			secret: agenaiConfig.exchange.credentials.apiSecret,
-			useFutures: true,
-		});
-
-	const marketDataClient: MarketDataClient =
-		options.marketDataClient ?? new BinanceUsdMClient();
+	const client = options.client;
+	const marketDataClient: MarketDataClient | undefined =
+		options.marketDataClient;
 
 	const dataProvider =
 		options.dataProvider ??
-		new DefaultDataProvider({ client: marketDataClient });
+		(marketDataClient
+			? new DefaultDataProvider({ client: marketDataClient })
+			: undefined);
+
+	if (!client) {
+		throw new Error(
+			"runBacktest requires a client implementing ExchangeAdapter (inject from app layer)."
+		);
+	}
+
+	if (!dataProvider && !options.timeframeData) {
+		throw new Error(
+			"runBacktest requires a dataProvider or timeframeData when no marketDataClient is supplied."
+		);
+	}
 
 	const riskManager = new RiskManager(agenaiConfig.risk);
 	const initialBalance =
@@ -210,7 +216,7 @@ export const runBacktest = async (
 	const timeframeSeries: TimeframeSeries[] = options.timeframeData
 		? buildProvidedSeries(options.timeframeData, trackedTimeframes)
 		: await loadTimeframeSeries(
-				dataProvider,
+				dataProvider as DataProvider,
 				effectiveConfig,
 				trackedTimeframes,
 				warmupByTimeframe,

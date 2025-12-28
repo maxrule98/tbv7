@@ -7,3 +7,5 @@ export * from "./loadRuntimeConfig";
 export * from "./runtimeFactory";
 export * from "./runtimeSnapshot";
 export * from "./parseStrategyArg";
+export * from "./marketData";
+export * from "./execution/executionProvider";

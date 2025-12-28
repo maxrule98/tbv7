@@ -5,12 +5,19 @@
 	"main": "dist/main.js",
 	"types": "dist/main.d.ts",
 	"dependencies": {
+		"@agenai/app-di": "workspace:*",
 		"@agenai/core": "workspace:*",
-		"@agenai/runtime": "workspace:*"
+		"@agenai/runtime": "workspace:*",
+		"@agenai/exchange-mexc": "workspace:*",
+		"@agenai/exchange-binance": "workspace:*"
 	},
 	"scripts": {
 		"build": "tsc -p tsconfig.json",
 		"dev": "ts-node --project tsconfig.dev.json --require tsconfig-paths/register src/main.ts",
-		"start": "node dist/main.js"
+		"start": "node dist/main.js",
+		"test": "vitest run --passWithNoTests"
+	},
+	"devDependencies": {
+		"vitest": "^1.6.1"
 	}
 }

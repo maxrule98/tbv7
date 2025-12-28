@@ -11,7 +11,6 @@
 	},
 	"dependencies": {
 		"@agenai/core": "workspace:*",
-		"@agenai/exchange-mexc": "workspace:*",
 		"ws": "^8.16.0"
 	},
 	"devDependencies": {

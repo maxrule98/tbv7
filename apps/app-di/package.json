@@ -1,21 +1,20 @@
 {
-	"name": "@agenai/runtime",
-	"version": "0.1.0",
+	"name": "@agenai/app-di",
+	"version": "1.0.0",
 	"private": true,
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
 	"scripts": {
-		"build": "tsc -p tsconfig.build.json",
+		"build": "tsc -p tsconfig.json",
 		"test": "vitest run --passWithNoTests"
 	},
 	"dependencies": {
 		"@agenai/core": "workspace:*",
+		"@agenai/runtime": "workspace:*",
 		"@agenai/data": "workspace:*",
 		"@agenai/execution-engine": "workspace:*",
 		"@agenai/risk-engine": "workspace:*",
-		"ws": "^8.16.0"
-	},
-	"devDependencies": {
-		"@types/ws": "^8.5.10"
+		"@agenai/exchange-mexc": "workspace:*",
+		"@agenai/exchange-binance": "workspace:*"
 	}
 }

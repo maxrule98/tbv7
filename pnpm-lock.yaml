@@ -43,32 +43,100 @@ importers:
         specifier: ^1.5.0
         version: 1.6.1(@types/node@20.19.25)
 
-  apps/backtest-cli:
+  apps/app-di:
     dependencies:
       '@agenai/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agenai/data':
+        specifier: workspace:*
+        version: link:../../packages/data
+      '@agenai/exchange-binance':
+        specifier: workspace:*
+        version: link:../../packages/exchange-binance
+      '@agenai/exchange-mexc':
+        specifier: workspace:*
+        version: link:../../packages/exchange-mexc
+      '@agenai/execution-engine':
+        specifier: workspace:*
+        version: link:../../packages/execution-engine
+      '@agenai/risk-engine':
+        specifier: workspace:*
+        version: link:../../packages/risk-engine
+      '@agenai/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+
+  apps/backtest-cli:
+    dependencies:
+      '@agenai/app-di':
+        specifier: workspace:*
+        version: link:../app-di
+      '@agenai/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@agenai/data':
+        specifier: workspace:*
+        version: link:../../packages/data
+      '@agenai/exchange-binance':
+        specifier: workspace:*
+        version: link:../../packages/exchange-binance
+      '@agenai/exchange-mexc':
+        specifier: workspace:*
+        version: link:../../packages/exchange-mexc
+      '@agenai/execution-engine':
+        specifier: workspace:*
+        version: link:../../packages/execution-engine
+      '@agenai/risk-engine':
+        specifier: workspace:*
+        version: link:../../packages/risk-engine
       '@agenai/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
 
   apps/trader-cli:
     dependencies:
+      '@agenai/app-di':
+        specifier: workspace:*
+        version: link:../app-di
       '@agenai/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agenai/exchange-binance':
+        specifier: workspace:*
+        version: link:../../packages/exchange-binance
+      '@agenai/exchange-mexc':
+        specifier: workspace:*
+        version: link:../../packages/exchange-mexc
       '@agenai/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+    devDependencies:
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@20.19.25)
 
   apps/trader-server:
     dependencies:
+      '@agenai/app-di':
+        specifier: workspace:*
+        version: link:../app-di
       '@agenai/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agenai/exchange-binance':
+        specifier: workspace:*
+        version: link:../../packages/exchange-binance
+      '@agenai/exchange-mexc':
+        specifier: workspace:*
+        version: link:../../packages/exchange-mexc
       '@agenai/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+    devDependencies:
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@20.19.25)
 
   packages/core:
     dependencies:
@@ -91,9 +159,6 @@ importers:
       '@agenai/core':
         specifier: workspace:*
         version: link:../core
-      '@agenai/exchange-mexc':
-        specifier: workspace:*
-        version: link:../exchange-mexc
       ws:
         specifier: ^8.16.0
         version: 8.18.3
@@ -131,9 +196,6 @@ importers:
       '@agenai/core':
         specifier: workspace:*
         version: link:../core
-      '@agenai/exchange-mexc':
-        specifier: workspace:*
-        version: link:../exchange-mexc
       '@agenai/risk-engine':
         specifier: workspace:*
         version: link:../risk-engine
@@ -165,12 +227,6 @@ importers:
       '@agenai/data':
         specifier: workspace:*
         version: link:../data
-      '@agenai/exchange-binance':
-        specifier: workspace:*
-        version: link:../exchange-binance
-      '@agenai/exchange-mexc':
-        specifier: workspace:*
-        version: link:../exchange-mexc
       '@agenai/execution-engine':
         specifier: workspace:*
         version: link:../execution-engine
