@@ -3,6 +3,7 @@ export * from "./types";
 export * from "./time";
 export * from "./exchange";
 export * from "./data/multiTimeframeCache";
+export * from "./data/CandleStore";
 export * from "./strategies/vwap-delta-gamma";
 export * from "./strategies/ultra-aggressive-btc-usdt";
 export * from "./strategies/registry";

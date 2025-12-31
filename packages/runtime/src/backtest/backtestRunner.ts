@@ -3,6 +3,7 @@ import {
 	AccountConfig,
 	AgenaiConfig,
 	Candle,
+	CandleStore,
 	ExchangeAdapter,
 	PositionSide,
 	StrategyConfig,
@@ -43,7 +44,6 @@ import {
 	createRuntime,
 	type RuntimeSnapshot,
 } from "../runtimeSnapshot";
-import { BacktestTimeframeCache } from "./BacktestTimeframeCache";
 import {
 	BacktestConfig,
 	BacktestResolvedConfig,
@@ -225,11 +225,21 @@ export const runBacktest = async (
 		});
 	}
 
-	const cache = new BacktestTimeframeCache({
-		timeframes: trackedTimeframes,
-		limit: cacheLimit,
+	// Calculate max candles per timeframe
+	const maxCandlesByTimeframe: Record<string, number> = {};
+	for (const tf of trackedTimeframes) {
+		maxCandlesByTimeframe[tf] = cacheLimit;
+	}
+
+	const candleStore = new CandleStore({
+		defaultMaxCandles: cacheLimit,
+		maxCandlesByTimeframe,
 	});
-	primeCacheWithWarmup(timeframeSeries, cache, effectiveConfig.startTimestamp);
+	primeCacheWithWarmup(
+		timeframeSeries,
+		candleStore,
+		effectiveConfig.startTimestamp
+	);
 
 	const executionSeries = timeframeSeries.find(
 		(series) => series.timeframe === timeframe
@@ -240,7 +250,8 @@ export const runBacktest = async (
 
 	const runtime = await createRuntime(runtimeSnapshot, {
 		strategyOverride: options.strategyOverride,
-		builder: async () => createBacktestStrategy(agenaiConfig.strategy, cache),
+		builder: async () =>
+			createBacktestStrategy(agenaiConfig.strategy, candleStore),
 		builderName: options.strategyOverride ? undefined : "backtest_strategy",
 	});
 	const { strategy, source: strategySource } = runtime;
@@ -301,7 +312,7 @@ export const runBacktest = async (
 	for (const candle of executionSeries.candles) {
 		updateCacheUntilTimestamp(
 			timeframeSeries,
-			cache,
+			candleStore,
 			indexByTimeframe,
 			candle.timestamp
 		);
@@ -311,15 +322,15 @@ export const runBacktest = async (
 			continue;
 		}
 
-		const buffer = await cache.getCandles(timeframe);
+		const buffer = candleStore.getSeries(timeframe);
 		if (!buffer.length) {
 			continue;
 		}
 
-		// Build multi-timeframe series from cache
+		// Build multi-timeframe series from CandleStore
 		const series: Record<string, Candle[]> = {};
 		for (const tf of trackedTimeframes) {
-			const tfCandles = await cache.getCandles(tf);
+			const tfCandles = candleStore.getSeries(tf);
 			if (tfCandles.length > 0) {
 				series[tf] = tfCandles;
 			}
@@ -381,7 +392,7 @@ export const runBacktest = async (
 
 const primeCacheWithWarmup = (
 	series: TimeframeSeries[],
-	cache: BacktestTimeframeCache,
+	store: CandleStore,
 	startTimestamp: number
 ): number => {
 	let warmupCandleCount = 0;
@@ -397,7 +408,7 @@ const primeCacheWithWarmup = (
 			partition += 1;
 		}
 		if (partition > 0) {
-			cache.setCandles(frame.timeframe, frame.candles.slice(0, partition));
+			store.ingestMany(frame.timeframe, frame.candles.slice(0, partition));
 			warmupCandleCount += partition;
 		}
 	}
@@ -455,7 +466,7 @@ const buildProvidedSeries = (
 
 const updateCacheUntilTimestamp = (
 	series: TimeframeSeries[],
-	cache: BacktestTimeframeCache,
+	store: CandleStore,
 	indices: Map<string, number>,
 	timestamp: number
 ): void => {
@@ -470,7 +481,7 @@ const updateCacheUntilTimestamp = (
 			pointer += 1;
 		}
 		if (pending.length) {
-			cache.appendCandles(frame.timeframe, pending);
+			store.ingestMany(frame.timeframe, pending);
 		}
 		indices.set(frame.timeframe, pointer);
 	}
@@ -478,10 +489,10 @@ const updateCacheUntilTimestamp = (
 
 const createBacktestStrategy = async (
 	strategyConfig: StrategyConfig,
-	cache: BacktestTimeframeCache
+	store: CandleStore
 ): Promise<TraderStrategy> => {
 	const entry = getStrategyDefinition(strategyConfig.id);
-	const dependencies = buildBacktestDependencies(entry, strategyConfig, cache);
+	const dependencies = buildBacktestDependencies(entry, strategyConfig, store);
 	const strategyInstance = entry.createStrategy(
 		strategyConfig as unknown,
 		dependencies
@@ -495,21 +506,21 @@ const createBacktestStrategy = async (
 const buildBacktestDependencies = <TConfig, TDeps, TStrategy>(
 	entry: StrategyRegistryEntry<TConfig, TDeps, TStrategy>,
 	strategyConfig: StrategyConfig,
-	cache: BacktestTimeframeCache
+	store: CandleStore
 ): TDeps => {
 	const maybeBacktestDeps = (
 		entry.dependencies as {
 			buildBacktestDeps?: (
 				config: TConfig,
-				options: { cache: BacktestTimeframeCache }
+				options: { cache: CandleStore }
 			) => TDeps;
 		}
 	)?.buildBacktestDeps;
 	if (maybeBacktestDeps) {
-		return maybeBacktestDeps(strategyConfig as TConfig, { cache });
+		return maybeBacktestDeps(strategyConfig as TConfig, { cache: store });
 	}
 	if (entry.dependencies?.createCache) {
-		return { cache } as TDeps;
+		return { cache: store } as TDeps;
 	}
 	return {} as TDeps;
 };

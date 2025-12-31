@@ -3,7 +3,7 @@
 **Machine-Searchable Marker:**
 
 ```
-HG_PHASE_COMPLETED=A,B,C
+HG_PHASE_COMPLETED=A,B,C,D
 ```
 
 ## Phase Checklist
@@ -32,12 +32,26 @@ HG_PHASE_COMPLETED=A,B,C
 - [x] Update pollingMarketDataProvider to use shared function
 - [x] Update binanceUsdMMarketDataProvider to use shared function
 
-### Phase D: Centralize Storage with CandleStore (NOT STARTED)
+### Phase D: Centralize Storage with CandleStore ✅ COMPLETED
 
-- [ ] Create `packages/core/src/data/CandleStore.ts`
-- [ ] Implement ingest(), getSnapshot(), detectGaps()
-- [ ] Update runners to use CandleStore
-- [ ] Delete BacktestTimeframeCache
+- [x] Create `packages/core/src/data/CandleStore.ts` (232 lines)
+- [x] Implement ingest(), ingestMany(), getSeries(), getLatestCandle()
+- [x] Add comprehensive tests (34 tests passing)
+- [x] Update startTrader.ts to use CandleStore (replaced Map<string, Candle[]>)
+- [x] Update backtestRunner.ts to use CandleStore
+- [x] Delete BacktestTimeframeCache.ts (67 lines eliminated)
+- [x] Add guard tests to prevent regression
+- [x] Verify runtime parity maintained (4/4 tests passing)
+
+**Implementation Notes:**
+
+- CandleStore provides unified candle storage for both live and backtest modes
+- Deterministic time bucketing via bucketTimestamp from @agenai/core/time
+- Deduplication strategy: last-write-wins for same timestamp
+- Per-timeframe window limits with default fallback
+- Maintains sorted ascending order via binary search insertion
+- Synchronous getSeries() returns defensive copy
+- BacktestTimeframeCache completely replaced and deleted
 
 ### Phase E: Split ExchangeAdapter Interface (NOT STARTED)
 
@@ -183,66 +197,21 @@ pnpm -r test       # ✅ All 79 tests passed
 
 ---
 
-## Audit Findings (Pre-Implementation)
+## Phase Constraints
 
-### Time Utilities Current State:
+**What NOT to do in current architecture:**
 
-- `timeframeToMs()` exists in `packages/data/src/utils/timeframe.ts`
-- No bucketing/alignment utilities found
-- Timestamp normalization not formalized
-- Multiple places assume timestamps are aligned but don't validate
-
-### runTick Call Sites:
-
-- `packages/runtime/src/startTrader.ts` - Live trading loop
-- `packages/runtime/src/backtest/backtestRunner.ts` - Backtest replay
-- Both pass raw `candle` and `buffer` parameters
-
-### Buffer Management:
-
-- `startTrader.ts` uses `Map<string, Candle[]>` for buffers (lines ~330-360)
-- `backtestRunner.ts` uses `BacktestTimeframeCache` (line 227)
-- No unified snapshot concept
-
-### Existing Snapshot Types:
-
-- **NONE FOUND** - Buffers passed directly as arrays
-
----
-
-## Do Not Do In This Phase (A + B)
-
-❌ **NO aggregation/resampling logic** - Phase C/D
-❌ **NO gap repair extraction** - Phase C
-❌ **NO CandleStore unification** - Phase D
-❌ **NO interface split (MarketDataClient/ExecutionClient)** - Phase E
-❌ **NO venue enforcement in DI** - Phase E
-❌ **NO MarketDataPlant creation** - Phase F
-❌ **NO provider refactoring** - Phase F
+❌ **NO aggregation/resampling in CandleStore** - Wait for Phase F
+❌ **NO gap repair in CandleStore** - Handled by providers via repairCandleGap()
+❌ **NO multi-exchange reconciliation** - Future phase
+❌ **NO interface split (MarketDataClient/ExecutionClient)** - Phase E only
+❌ **NO MarketDataPlant creation** - Phase F only
 ❌ **NO new DI packages or duplicate factories**
 
-✅ **ONLY:**
+**Current architecture (Phase D):**
 
-- Pure time utilities with tests
-- TickSnapshot type definition
-- Snapshot builder with validation
-- runTick signature update
-- Runner wiring to pass snapshots
-- Guard tests
-
----
-
-## Next Phase Recommendation
-
-**Phase C: Extract Gap Repair Logic**
-
-Why this next:
-
-1. Safe, isolated change (pure extraction)
-2. Eliminates 70+ lines of duplication
-3. No architectural changes required
-4. Easy to test and validate
-5. Prepares for Phase D (CandleStore needs gap detection)
-
-Estimated effort: 2-3 days
-Risk level: LOW
+✅ CandleStore handles storage, deduplication, window trimming
+✅ Providers handle gap detection and repair via repairCandleGap()
+✅ Both live (startTrader) and backtest (backtestRunner) use CandleStore
+✅ Strategies receive CandleStore (with MultiTimeframeCache-compatible interface) in backtest mode
+✅ Live strategies use MultiTimeframeCache (different from CandleStore)

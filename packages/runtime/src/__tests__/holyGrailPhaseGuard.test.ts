@@ -136,3 +136,70 @@ describe("Holy Grail Phase C Guard Rails", () => {
 		expect(typeof dataModule.repairCandleGap).toBe("function");
 	});
 });
+
+describe("Holy Grail Phase D Guard Rails", () => {
+	it("should have CandleStore exported from @agenai/core", async () => {
+		const coreModule = await import("@agenai/core");
+		expect(coreModule.CandleStore).toBeDefined();
+		expect(typeof coreModule.CandleStore).toBe("function"); // Constructor
+	});
+
+	it("should NOT have BacktestTimeframeCache file", () => {
+		const backtestCachePath = path.join(
+			__dirname,
+			"../backtest/BacktestTimeframeCache.ts"
+		);
+		expect(
+			fs.existsSync(backtestCachePath),
+			"BacktestTimeframeCache.ts should be deleted in Phase D"
+		).toBe(false);
+	});
+
+	it("should NOT import BacktestTimeframeCache in backtestRunner", () => {
+		const backtestRunner = fs.readFileSync(
+			path.join(__dirname, "../backtest/backtestRunner.ts"),
+			"utf-8"
+		);
+		expect(backtestRunner).not.toContain("BacktestTimeframeCache");
+		expect(backtestRunner).toContain("CandleStore");
+	});
+
+	it("should NOT use Map<string, Candle[]> buffers in startTrader", () => {
+		const startTrader = fs.readFileSync(
+			path.join(__dirname, "../startTrader.ts"),
+			"utf-8"
+		);
+		// Should not have the old appendCandle helper
+		expect(startTrader).not.toContain("appendCandle");
+		// Should import and use CandleStore for runtime storage
+		expect(startTrader).toContain("CandleStore");
+		expect(startTrader).toContain("new CandleStore");
+		// Bootstrap can use Map temporarily, but runtime should use CandleStore
+		expect(startTrader).toContain("candleStore.ingest");
+		expect(startTrader).toContain("candleStore.getSeries");
+	});
+
+	it("should confirm HG_PHASE_COMPLETED=A,B,C,D marker exists", () => {
+		const progressPath = path.join(
+			__dirname,
+			"../marketData/HOLY_GRAIL_PROGRESS.md"
+		);
+		const content = fs.readFileSync(progressPath, "utf-8");
+		expect(content).toContain("HG_PHASE_COMPLETED=A,B,C,D");
+	});
+
+	it("should NOT contain stale pre-implementation audit in progress doc", () => {
+		const progressPath = path.join(
+			__dirname,
+			"../marketData/HOLY_GRAIL_PROGRESS.md"
+		);
+		const content = fs.readFileSync(progressPath, "utf-8");
+		// Should not claim backtestRunner uses BacktestTimeframeCache
+		expect(content).not.toContain("uses `BacktestTimeframeCache`");
+		expect(content).not.toContain("uses BacktestTimeframeCache");
+		// Should not have pre-implementation audit section
+		expect(content).not.toContain("Audit Findings (Pre-Implementation)");
+		// Should not reference old Map<string, Candle[]> as current state
+		expect(content).not.toContain("uses `Map<string, Candle[]>` for buffers");
+	});
+});

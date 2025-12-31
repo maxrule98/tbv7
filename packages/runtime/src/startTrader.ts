@@ -2,6 +2,7 @@ import {
 	AccountConfig,
 	AgenaiConfig,
 	Candle,
+	CandleStore,
 	ExecutionMode,
 	RiskConfig,
 	StrategyId,
@@ -324,12 +325,28 @@ interface ClosedCandleRuntimeOptions {
 const startClosedCandleRuntime = async (
 	options: ClosedCandleRuntimeOptions
 ): Promise<never> => {
-	const candlesByTimeframe = new Map(options.bootstrap.candlesByTimeframe);
+	// Calculate max candles per timeframe from warmup config
+	const maxCandlesByTimeframe: Record<string, number> = {};
+	const historyWindow = 600; // Default window
+	for (const tf of options.signalTimeframes) {
+		// Use a generous limit that accommodates warmup + history
+		maxCandlesByTimeframe[tf] = historyWindow;
+	}
+
+	// Initialize CandleStore
+	const candleStore = new CandleStore({
+		defaultMaxCandles: historyWindow,
+		maxCandlesByTimeframe,
+	});
+
+	// Ingest bootstrap candles
 	for (const timeframe of options.signalTimeframes) {
-		if (!candlesByTimeframe.has(timeframe)) {
-			candlesByTimeframe.set(timeframe, []);
+		const candles = options.bootstrap.candlesByTimeframe.get(timeframe) ?? [];
+		if (candles.length > 0) {
+			candleStore.ingestMany(timeframe, candles);
 		}
 	}
+
 	const lastTimestampByTimeframe = new Map(
 		options.bootstrap.lastTimestampByTimeframe
 	);
@@ -357,14 +374,11 @@ const startClosedCandleRuntime = async (
 		}
 
 		lastTimestampByTimeframe.set(event.timeframe, event.candle.timestamp);
-		const buffer = appendCandle(
-			candlesByTimeframe,
-			event.timeframe,
-			event.candle
-		);
+		candleStore.ingest(event.timeframe, event.candle);
 		logClosedCandleEvent(event);
 
 		if (event.timeframe === options.executionTimeframe) {
+			const buffer = candleStore.getSeries(event.timeframe);
 			maybeLogFingerprint({
 				timeframe: event.timeframe,
 				buffer,
@@ -374,10 +388,10 @@ const startClosedCandleRuntime = async (
 				lastLoggedByTimeframe: lastFingerprintByTimeframe,
 			});
 
-			// Build multi-timeframe series from buffers
+			// Build multi-timeframe series from CandleStore
 			const series: Record<string, Candle[]> = {};
-			for (const [tf, candles] of candlesByTimeframe.entries()) {
-				series[tf] = candles;
+			for (const tf of options.signalTimeframes) {
+				series[tf] = candleStore.getSeries(tf);
 			}
 
 			// Build snapshot
@@ -448,21 +462,6 @@ const maybeLogFingerprint = (context: FingerprintLogContext): void => {
 		windowMs: FIFTEEN_MIN_MS,
 	});
 	context.lastLoggedByTimeframe.set(context.timeframe, context.latestTimestamp);
-};
-
-const appendCandle = (
-	candlesByTimeframe: Map<string, Candle[]>,
-	timeframe: string,
-	candle: Candle,
-	limit = 600
-): Candle[] => {
-	const buffer = candlesByTimeframe.get(timeframe) ?? [];
-	buffer.push(candle);
-	if (buffer.length > limit) {
-		buffer.splice(0, buffer.length - limit);
-	}
-	candlesByTimeframe.set(timeframe, buffer);
-	return buffer;
 };
 
 const logClosedCandleEvent = (event: ClosedCandleEvent): void => {
