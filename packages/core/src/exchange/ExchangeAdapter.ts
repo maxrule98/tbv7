@@ -21,7 +21,8 @@ export interface ExchangeOrder {
 	side: "buy" | "sell";
 	amount: number;
 	price?: number;
-	[key: string]: any; // Allow additional CCXT fields
+	average?: number;
+	raw?: Record<string, unknown>; // Optional raw CCXT fields
 }
 
 /**

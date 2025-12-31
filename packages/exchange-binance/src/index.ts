@@ -5,7 +5,7 @@ import {
 	ExchangePositionSnapshot,
 	ExchangeOrder,
 } from "@agenai/core";
-import { mapCcxtCandleToCandle } from "@agenai/exchange-mexc";
+import { mapCcxtCandleToCandle } from "@agenai/data";
 
 export interface BinanceSpotClientOptions {
 	apiKey?: string;

@@ -5,6 +5,7 @@
 	"types": "dist/index.d.ts",
 	"dependencies": {
 		"@agenai/core": "workspace:*",
+		"@agenai/data": "workspace:*",
 		"ccxt": "^4.3.81"
 	},
 	"scripts": {

@@ -7,7 +7,7 @@ import {
 	ExchangePositionSnapshot,
 	ExchangeOrder,
 } from "@agenai/core";
-import { mapCcxtCandleToCandle } from "./utils/ccxtMapper";
+import { mapCcxtCandleToCandle } from "@agenai/data";
 
 const mexcLogger = createLogger("exchange:mexc");
 

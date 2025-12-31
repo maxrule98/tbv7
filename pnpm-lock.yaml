@@ -159,6 +159,9 @@ importers:
       '@agenai/core':
         specifier: workspace:*
         version: link:../core
+      ccxt:
+        specifier: ^4.3.81
+        version: 4.5.19
       ws:
         specifier: ^8.16.0
         version: 8.18.3
@@ -175,9 +178,9 @@ importers:
       '@agenai/core':
         specifier: workspace:*
         version: link:../core
-      '@agenai/exchange-mexc':
+      '@agenai/data':
         specifier: workspace:*
-        version: link:../exchange-mexc
+        version: link:../data
       ccxt:
         specifier: ^4.3.81
         version: 4.5.19
@@ -187,6 +190,9 @@ importers:
       '@agenai/core':
         specifier: workspace:*
         version: link:../core
+      '@agenai/data':
+        specifier: workspace:*
+        version: link:../data
       ccxt:
         specifier: ^4.3.81
         version: 4.5.19

@@ -11,6 +11,7 @@
 	},
 	"dependencies": {
 		"@agenai/core": "workspace:*",
+		"ccxt": "^4.3.81",
 		"ws": "^8.16.0"
 	},
 	"devDependencies": {
