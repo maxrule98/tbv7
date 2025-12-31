@@ -53,6 +53,7 @@ import {
 import { buildRuntimeFingerprintLogPayload } from "../runtimeFingerprint";
 import type { ExecutionProvider } from "../execution/executionProvider";
 import { runTick } from "../loop/runTick";
+import { buildTickSnapshot } from "../loop/buildTickSnapshot";
 
 class BacktestExecutionProvider implements ExecutionProvider {
 	readonly venue = "backtest";
@@ -315,6 +316,24 @@ export const runBacktest = async (
 			continue;
 		}
 
+		// Build multi-timeframe series from cache
+		const series: Record<string, Candle[]> = {};
+		for (const tf of trackedTimeframes) {
+			const tfCandles = await cache.getCandles(tf);
+			if (tfCandles.length > 0) {
+				series[tf] = tfCandles;
+			}
+		}
+
+		// Build snapshot
+		const snapshot = buildTickSnapshot({
+			symbol,
+			signalVenue: venues.signalVenue,
+			executionTimeframe: timeframe,
+			executionCandle: candle,
+			series,
+		});
+
 		const recordHook = createExecutionRecorder(
 			trades,
 			candle,
@@ -322,8 +341,7 @@ export const runBacktest = async (
 		);
 
 		const tickResult = await runTick({
-			candle,
-			buffer,
+			snapshot,
 			strategy,
 			riskManager,
 			riskConfig: agenaiConfig.risk,

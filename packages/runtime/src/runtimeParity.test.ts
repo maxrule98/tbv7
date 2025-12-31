@@ -27,6 +27,7 @@ import {
 } from "./runtimeShared";
 import type { StrategyRuntimeFingerprints } from "./fingerprints";
 import { runTick } from "./loop/runTick";
+import { buildTickSnapshot } from "./loop/buildTickSnapshot";
 import type { ExecutionProvider } from "./execution/executionProvider";
 import type { TraderStrategy } from "./types";
 
@@ -382,7 +383,7 @@ describe("runtime parity", () => {
 				intent: "OPEN_LONG",
 				reason: "parity_runTick",
 				symbol: "BTC/USDT",
-				timestamp: 2,
+				timestamp: 60_000,
 			}),
 		} as unknown as TraderStrategy;
 
@@ -390,7 +391,7 @@ describe("runtime parity", () => {
 			{
 				symbol: "BTC/USDT",
 				timeframe: "1m",
-				timestamp: 1,
+				timestamp: 0,
 				open: 100,
 				high: 101,
 				low: 99,
@@ -400,7 +401,7 @@ describe("runtime parity", () => {
 			{
 				symbol: "BTC/USDT",
 				timeframe: "1m",
-				timestamp: 2,
+				timestamp: 60_000,
 				open: 100,
 				high: 102,
 				low: 99,
@@ -420,9 +421,18 @@ describe("runtime parity", () => {
 			timeframe: "1m",
 			isClosed: true,
 		};
+
+		// Build snapshot
+		const testSnapshot = buildTickSnapshot({
+			symbol: "BTC/USDT",
+			signalVenue: mockVenues.signalVenue,
+			executionTimeframe: "1m",
+			executionCandle: candles[1]!,
+			series: { "1m": candles },
+		});
+
 		const baseInput = {
-			candle: candles[1]!,
-			buffer: candles,
+			snapshot: testSnapshot,
 			strategy,
 			riskManager,
 			riskConfig: agenaiConfig.risk,

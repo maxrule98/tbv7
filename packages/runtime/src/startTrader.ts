@@ -19,6 +19,8 @@ import {
 	runtimeLogger,
 } from "./runtimeShared";
 import { runTick } from "./loop/runTick";
+import { buildTickSnapshot } from "./loop/buildTickSnapshot";
+import type { ClosedCandleSource } from "./types/tickSnapshot";
 import type { StrategyRuntimeBuilder } from "./runtimeFactory";
 import type { StrategyDecisionContext, TraderStrategy } from "./types";
 import type { LoadedRuntimeConfig, VenueSelection } from "./loadRuntimeConfig";
@@ -371,9 +373,25 @@ const startClosedCandleRuntime = async (
 				latestTimestamp: event.candle.timestamp,
 				lastLoggedByTimeframe: lastFingerprintByTimeframe,
 			});
+
+			// Build multi-timeframe series from buffers
+			const series: Record<string, Candle[]> = {};
+			for (const [tf, candles] of candlesByTimeframe.entries()) {
+				series[tf] = candles;
+			}
+
+			// Build snapshot
+			const snapshot = buildTickSnapshot({
+				symbol: options.instrument.symbol,
+				signalVenue: options.venues.signalVenue,
+				executionTimeframe: options.executionTimeframe,
+				executionCandle: event.candle,
+				series,
+				arrivalDelayMs: event.arrivalDelayMs,
+			});
+
 			const tickResult = await runTick({
-				candle: event.candle,
-				buffer,
+				snapshot,
 				strategy: options.strategy,
 				riskManager: options.riskManager,
 				riskConfig: options.riskConfig,

@@ -25,10 +25,10 @@ import {
 import type { StrategyRuntimeFingerprints } from "../fingerprints";
 import type { StrategyDecisionContext, TraderStrategy } from "../types";
 import type { ExecutionProvider } from "../execution/executionProvider";
+import type { TickSnapshot } from "../types/tickSnapshot";
 
 export interface TickInput {
-	candle: Candle;
-	buffer: Candle[];
+	snapshot: TickSnapshot;
 	strategy: TraderStrategy;
 	riskManager: RiskManager;
 	riskConfig: RiskConfig;
@@ -95,18 +95,19 @@ const finalizeGuardedExit = (
 };
 
 export const runTick = async (input: TickInput): Promise<TickResult> => {
+	// Extract execution candle and buffer from snapshot
+	const candle = input.snapshot.executionCandle;
+	const buffer = input.snapshot.series[input.snapshot.executionTimeframe] ?? [];
+
 	const positionState = input.executionProvider.getPosition(input.symbol);
-	const unrealizedPnl = calculateUnrealizedPnl(
-		positionState,
-		input.candle.close
-	);
+	const unrealizedPnl = calculateUnrealizedPnl(positionState, candle.close);
 	const prePlanSnapshot =
 		input.executionProvider.snapshotAccount(unrealizedPnl);
 	let fallbackEquity = prePlanSnapshot?.equity ?? input.accountEquityFallback;
 
 	const forcedExit = await maybeHandleForcedExit(
 		positionState,
-		input.candle,
+		candle,
 		input.riskManager,
 		input.executionProvider,
 		fallbackEquity,
@@ -116,7 +117,7 @@ export const runTick = async (input: TickInput): Promise<TickResult> => {
 	if (forcedExit.handled) {
 		return finalizeGuardedExit(forcedExit, {
 			symbol: input.symbol,
-			candle: input.candle,
+			candle,
 			executionProvider: input.executionProvider,
 			fallbackEquity,
 			kind: "forced",
@@ -126,7 +127,7 @@ export const runTick = async (input: TickInput): Promise<TickResult> => {
 	const trailingExit = await maybeHandleTrailingStop(
 		input.symbol,
 		positionState,
-		input.candle,
+		candle,
 		input.riskManager,
 		input.executionProvider,
 		fallbackEquity,
@@ -137,7 +138,7 @@ export const runTick = async (input: TickInput): Promise<TickResult> => {
 	if (trailingExit.handled) {
 		return finalizeGuardedExit(trailingExit, {
 			symbol: input.symbol,
-			candle: input.candle,
+			candle,
 			executionProvider: input.executionProvider,
 			fallbackEquity,
 			kind: "trailing",
@@ -147,18 +148,18 @@ export const runTick = async (input: TickInput): Promise<TickResult> => {
 	const intent = withRuntimeFingerprints(
 		enrichIntentMetadata(
 			await input.strategy.decide(
-				input.buffer,
+				buffer,
 				positionState.side,
 				input.decisionContext
 			)
 		),
 		input.fingerprints
 	);
-	logStrategyDecision(input.candle, intent, input.fingerprints);
+	logStrategyDecision(candle, intent, input.fingerprints);
 
 	const plan = input.riskManager.plan(
 		intent,
-		input.candle.close,
+		candle.close,
 		fallbackEquity,
 		positionState
 	);
@@ -199,11 +200,11 @@ export const runTick = async (input: TickInput): Promise<TickResult> => {
 		};
 	}
 
-	logTradePlan(plan, input.candle, intent);
+	logTradePlan(plan, candle, intent);
 	let executionResult: ExecutionResult | null = null;
 	try {
 		executionResult = await input.executionProvider.execute(plan, {
-			price: input.candle.close,
+			price: candle.close,
 		});
 		if (executionResult.status === "skipped") {
 			logExecutionSkipped(
@@ -213,7 +214,7 @@ export const runTick = async (input: TickInput): Promise<TickResult> => {
 			);
 		} else {
 			logExecutionResult(executionResult);
-			input.recordHook?.(plan, executionResult, input.candle);
+			input.recordHook?.(plan, executionResult, candle);
 		}
 	} catch (error) {
 		logExecutionError(error, plan);
@@ -223,9 +224,9 @@ export const runTick = async (input: TickInput): Promise<TickResult> => {
 	logPaperPosition(input.symbol, latestPosition);
 	const accountSnapshot = snapshotPaperAccount(
 		input.executionProvider,
-		calculateUnrealizedPnl(latestPosition, input.candle.close),
+		calculateUnrealizedPnl(latestPosition, candle.close),
 		input.symbol,
-		input.candle.timestamp
+		candle.timestamp
 	);
 	if (accountSnapshot) {
 		fallbackEquity = accountSnapshot.equity;
