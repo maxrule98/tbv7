@@ -52,15 +52,16 @@ const main = async (): Promise<void> => {
 		executionTimeframe: runtimeBootstrap.venues.executionTimeframe,
 	});
 
-	const exchangeAdapter = createExchangeAdapter(runtimeSnapshot);
+	const signalAdapter = createExchangeAdapter(runtimeSnapshot);
+	const executionAdapter = createExchangeAdapter(runtimeSnapshot);
 	const marketDataProvider = createMarketDataProvider(
 		runtimeSnapshot,
-		exchangeAdapter,
+		signalAdapter,
 		10_000
 	);
 	const executionProvider = createExecutionProvider(
 		runtimeSnapshot,
-		exchangeAdapter
+		executionAdapter
 	);
 
 	await startTrader(

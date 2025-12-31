@@ -3,7 +3,7 @@
 **Machine-Searchable Marker:**
 
 ```
-HG_PHASE_COMPLETED=A,B,C,D
+HG_PHASE_COMPLETED=A,B,C,D,E
 ```
 
 ## Phase Checklist
@@ -53,11 +53,27 @@ HG_PHASE_COMPLETED=A,B,C,D
 - Synchronous getSeries() returns defensive copy
 - BacktestTimeframeCache completely replaced and deleted
 
-### Phase E: Split ExchangeAdapter Interface (NOT STARTED)
+### Phase E: Split ExchangeAdapter Interface ✅ COMPLETED
 
-- [ ] Create MarketDataClient and ExecutionClient interfaces
-- [ ] Update exchange packages
-- [ ] Enforce venue split in DI
+- [x] Create MarketDataClient and ExecutionClient interfaces in @agenai/core
+- [x] Update ExchangeAdapter to type composition (MarketDataClient & ExecutionClient)
+- [x] Update runtime backtestRunner to use ExecutionClient (removed ExchangeAdapter)
+- [x] Update market data providers to use MarketDataClient
+- [x] Update execution providers to use ExecutionClient
+- [x] Enforce venue split in DI (apps/app-di)
+- [x] Clean up identity functions (removed createMarketDataClient)
+- [x] Add guard tests for Phase E completion
+- [x] Verify zero ExchangeAdapter references in packages/runtime/src
+
+**Implementation Notes:**
+
+- MarketDataClient: Read-only interface for fetchOHLCV (signal venue)
+- ExecutionClient: Write interface for orders/positions/balance (execution venue)
+- ExchangeAdapter: Backward-compatible type composition (deprecated)
+- Import boundaries preserved: runtime/data/execution cannot import exchange packages
+- Venue split enabled: Different exchanges can be used for signals vs execution
+- Type safety: TypeScript enforces correct client usage in DI layer
+- Clean modularity: Removed unused parameters and identity functions
 
 ### Phase F: Introduce MarketDataPlant (NOT STARTED)
 
@@ -204,7 +220,6 @@ pnpm -r test       # ✅ All 79 tests passed
 ❌ **NO aggregation/resampling in CandleStore** - Wait for Phase F
 ❌ **NO gap repair in CandleStore** - Handled by providers via repairCandleGap()
 ❌ **NO multi-exchange reconciliation** - Future phase
-❌ **NO interface split (MarketDataClient/ExecutionClient)** - Phase E only
 ❌ **NO MarketDataPlant creation** - Phase F only
 ❌ **NO new DI packages or duplicate factories**
 
@@ -215,3 +230,4 @@ pnpm -r test       # ✅ All 79 tests passed
 ✅ Both live (startTrader) and backtest (backtestRunner) use CandleStore
 ✅ Strategies receive CandleStore (with MultiTimeframeCache-compatible interface) in backtest mode
 ✅ Live strategies use MultiTimeframeCache (different from CandleStore)
+✅ Interface split complete (MarketDataClient/ExecutionClient) - do not reintroduce ExchangeAdapter into runtime.

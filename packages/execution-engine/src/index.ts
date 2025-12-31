@@ -1,4 +1,4 @@
-import { PositionSide, createLogger, ExchangeAdapter } from "@agenai/core";
+import { PositionSide, createLogger, ExecutionClient } from "@agenai/core";
 import { TradePlan } from "@agenai/risk-engine";
 import {
 	ClosedTrade,
@@ -11,7 +11,7 @@ const paperLogger = createLogger("execution-engine:paper");
 export type ExecutionMode = "paper" | "live";
 
 export interface ExecutionEngineOptions {
-	client: ExchangeAdapter;
+	client: ExecutionClient;
 	mode?: ExecutionMode;
 	paperAccount?: PaperAccount;
 }

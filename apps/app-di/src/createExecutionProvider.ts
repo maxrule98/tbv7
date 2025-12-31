@@ -1,4 +1,4 @@
-import { ExchangeAdapter } from "@agenai/core";
+import { ExecutionClient } from "@agenai/core";
 import {
 	ExecutionProvider,
 	MexcExecutionProvider,
@@ -9,12 +9,12 @@ import { RiskManager } from "@agenai/risk-engine";
 
 export const createExecutionProvider = (
 	runtimeSnapshot: RuntimeSnapshot,
-	exchangeAdapter: ExchangeAdapter
+	executionClient: ExecutionClient
 ): MexcExecutionProvider => {
 	const executionMode = runtimeSnapshot.config.agenaiConfig.env.executionMode;
 	const accountConfig = runtimeSnapshot.config.accountConfig;
 	return new MexcExecutionProvider({
-		client: exchangeAdapter,
+		client: executionClient,
 		mode: executionMode,
 		accountConfig,
 	});
@@ -24,7 +24,7 @@ export const createExecutionProvider = (
 // a paper ExecutionEngine mirroring live wiring for consistency in tests.
 export const createBacktestExecution = (
 	runtimeSnapshot: RuntimeSnapshot,
-	exchangeAdapter: ExchangeAdapter
+	executionClient: ExecutionClient
 ): ExecutionProvider => {
 	const accountConfig = runtimeSnapshot.config.accountConfig;
 	const risk = runtimeSnapshot.config.agenaiConfig.risk;
@@ -32,7 +32,7 @@ export const createBacktestExecution = (
 	void riskManager;
 	const paperAccount = new PaperAccount(accountConfig.startingBalance ?? 0);
 	const engine = new ExecutionEngine({
-		client: exchangeAdapter,
+		client: executionClient,
 		mode: "paper",
 		paperAccount,
 	});

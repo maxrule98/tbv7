@@ -1,13 +1,8 @@
-import { Candle } from "@agenai/core";
+import type { Candle, MarketDataClient } from "@agenai/core";
 
-export interface MarketDataClient {
-	fetchOHLCV: (
-		symbol: string,
-		timeframe: string,
-		limit: number,
-		since?: number
-	) => Promise<Candle[]>;
-}
+// Note: MarketDataClient is now imported from @agenai/core
+// The interface here was previously duplicated but is now unified
+export type { MarketDataClient };
 
 export interface DataProviderLogger {
 	info?: (event: string, payload?: Record<string, unknown>) => void;

@@ -1,4 +1,4 @@
-import { ExchangeAdapter } from "@agenai/core";
+import { MarketDataClient } from "@agenai/core";
 import {
 	BinanceUsdMMarketDataProvider,
 	PollingMarketDataProvider,
@@ -12,26 +12,21 @@ const isBinanceVenue = (venue: string): boolean =>
 
 export const createMarketDataProvider = (
 	runtimeSnapshot: RuntimeSnapshot,
-	exchangeAdapter: ExchangeAdapter,
+	marketDataClient: MarketDataClient,
 	pollIntervalMs: number
 ): MarketDataProvider => {
 	const venue = runtimeSnapshot.config.venues.signalVenue;
 	if (isBinanceVenue(venue)) {
-		return new BinanceUsdMMarketDataProvider(exchangeAdapter);
+		return new BinanceUsdMMarketDataProvider(marketDataClient);
 	}
-	return new PollingMarketDataProvider(exchangeAdapter, {
+	return new PollingMarketDataProvider(marketDataClient, {
 		pollIntervalMs,
 		venue,
 	});
 };
 
-export const createMarketDataClient = (
-	exchangeAdapter: ExchangeAdapter
-): ExchangeAdapter => exchangeAdapter;
-
 export const createDataProvider = (
-	runtimeSnapshot: RuntimeSnapshot,
-	exchangeAdapter: ExchangeAdapter
+	marketDataClient: MarketDataClient
 ): DefaultDataProvider => {
-	return new DefaultDataProvider({ client: exchangeAdapter });
+	return new DefaultDataProvider({ client: marketDataClient });
 };

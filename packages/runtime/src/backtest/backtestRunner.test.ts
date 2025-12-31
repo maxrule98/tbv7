@@ -3,10 +3,10 @@ import type {
 	AccountConfig,
 	AgenaiConfig,
 	Candle,
-	ExchangeAdapter,
 	StrategyConfig,
 	TradeIntent,
 } from "@agenai/core";
+import type { ExecutionClient } from "@agenai/core";
 import { runBacktest } from "./backtestRunner";
 import type { BacktestConfig } from "./backtestTypes";
 import type { TraderStrategy } from "../types";
@@ -148,10 +148,11 @@ const createAgenaiConfig = (): AgenaiConfig => {
 
 const accountConfig: AccountConfig = { startingBalance: defaultInitialBalance };
 
-const createMockClient = () =>
-	({
-		fetchOHLCV: vi.fn(),
-	}) as unknown as ExchangeAdapter;
+const createMockExecutionClient = (): ExecutionClient => ({
+	createMarketOrder: vi.fn(),
+	getBalanceUSDT: vi.fn(),
+	getPosition: vi.fn(),
+});
 
 describe("runBacktest", () => {
 	it("replays provided candle data with a scripted strategy", async () => {
@@ -181,17 +182,16 @@ describe("runBacktest", () => {
 			{ symbol, intent: "CLOSE_LONG", reason: "exit" },
 		]);
 
-		const mockClient = createMockClient();
+		const executionClient = createMockExecutionClient();
 
 		const result = await runBacktest(backtestConfig, {
 			agenaiConfig,
 			accountConfig,
 			strategyOverride: strategy,
-			client: mockClient,
+			executionClient,
 			timeframeData,
 		});
 
-		expect(mockClient.fetchOHLCV).not.toHaveBeenCalled();
 		expect(result.trades).toHaveLength(2);
 		expect(result.trades[0]).toMatchObject({ action: "OPEN", side: "LONG" });
 		expect(result.trades[1]).toMatchObject({ action: "CLOSE", side: "LONG" });
@@ -213,7 +213,7 @@ describe("runBacktest", () => {
 			"5m": buildCandles("5m", [100, 101], baseTimestamp, 5 * 60_000),
 			"15m": buildCandles("15m", [100, 101], baseTimestamp, 15 * 60_000),
 		};
-		const mockClient = createMockClient();
+		const executionClient = createMockExecutionClient();
 		const strategy = scriptedStrategy([
 			{ symbol, intent: "NO_ACTION", reason: "noop" },
 		]);
@@ -221,7 +221,7 @@ describe("runBacktest", () => {
 		const result = await runBacktest(backtestConfig, {
 			agenaiConfig,
 			accountConfig,
-			client: mockClient,
+			executionClient,
 			strategyOverride: strategy,
 			timeframeData,
 		});
@@ -233,13 +233,13 @@ describe("runBacktest", () => {
 	it("throws when execution timeframe candles are missing", async () => {
 		const agenaiConfig = createAgenaiConfig();
 		const backtestConfig = buildBacktestConfig();
-		const mockClient = createMockClient();
+		const executionClient = createMockExecutionClient();
 
 		await expect(
 			runBacktest(backtestConfig, {
 				agenaiConfig,
 				accountConfig,
-				client: mockClient,
+				executionClient,
 				timeframeData: { "5m": [] },
 			})
 		).rejects.toThrow("No candles loaded for execution timeframe");
@@ -278,7 +278,7 @@ describe("runBacktest", () => {
 			const startTimestamp = baseTimestamp;
 			const endTimestamp = baseTimestamp + (candleCount - 1) * 60_000;
 			const agenaiConfig = createAgenaiConfig();
-			const mockClient = createMockClient();
+			const executionClient = createMockExecutionClient();
 			const backtestConfig = buildBacktestConfig({
 				startTimestamp,
 				endTimestamp,
@@ -288,7 +288,7 @@ describe("runBacktest", () => {
 			const result = await runBacktest(backtestConfig, {
 				agenaiConfig,
 				accountConfig,
-				client: mockClient,
+				executionClient,
 				timeframeData,
 			});
 

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { TradePlan } from "@agenai/risk-engine";
-import type { ExchangeAdapter } from "@agenai/core";
+import type { ExecutionClient } from "@agenai/core";
 import { ExecutionEngine, PaperAccount } from "./index";
 
-const dummyClient: ExchangeAdapter = {
+const dummyClient: ExecutionClient = {
 	createMarketOrder: async () => ({
 		id: "paper",
 		symbol: "",
@@ -11,7 +11,6 @@ const dummyClient: ExchangeAdapter = {
 		side: "buy",
 		amount: 0,
 	}),
-	fetchOHLCV: async () => [],
 	getBalanceUSDT: async () => 0,
 	getPosition: async () => ({
 		side: "FLAT",

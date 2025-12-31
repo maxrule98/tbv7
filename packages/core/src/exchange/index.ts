@@ -3,3 +3,5 @@ export type {
 	ExchangePositionSnapshot,
 	ExchangeOrder,
 } from "./ExchangeAdapter";
+export type { MarketDataClient } from "./MarketDataClient";
+export type { ExecutionClient } from "./ExecutionClient";

@@ -5,7 +5,6 @@ import {
 	createDataProvider,
 	createExchangeAdapter,
 	createExecutionProvider,
-	createMarketDataClient,
 	createMarketDataProvider,
 } from "./index";
 
@@ -178,11 +177,9 @@ describe("app-di factories", () => {
 		const snapshot = makeSnapshot();
 		const adapter = createExchangeAdapter(snapshot);
 		expect(isFunction(adapter.fetchOHLCV)).toBe(true);
-		const marketDataClient = createMarketDataClient(adapter);
-		const dataProvider = createDataProvider(snapshot, adapter);
+		const dataProvider = createDataProvider(adapter);
 		expect(dataProvider).toBeDefined();
 		const executionProvider = createBacktestExecution(snapshot, adapter);
 		expect(executionProvider.getPosition("BTC/USDT").side).toBe("FLAT");
-		expect(isFunction(marketDataClient.fetchOHLCV)).toBe(true);
 	});
 });

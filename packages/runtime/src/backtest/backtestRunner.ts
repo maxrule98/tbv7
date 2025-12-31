@@ -4,13 +4,13 @@ import {
 	AgenaiConfig,
 	Candle,
 	CandleStore,
-	ExchangeAdapter,
 	PositionSide,
 	StrategyConfig,
 	StrategyId,
 	TradeIntent,
 	getStrategyDefinition,
 } from "@agenai/core";
+import type { ExecutionClient } from "@agenai/core";
 import {
 	DefaultDataProvider,
 	type DataProvider,
@@ -96,7 +96,7 @@ export interface RunBacktestOptions {
 	strategyProfile?: string;
 	riskProfile?: string;
 	strategyOverride?: TraderStrategy;
-	client?: ExchangeAdapter;
+	executionClient?: ExecutionClient;
 	dataProvider?: DataProvider;
 	marketDataClient?: MarketDataClient;
 	timeframeData?: Record<string, Candle[]>;
@@ -158,7 +158,7 @@ export const runBacktest = async (
 
 	const accountConfig = runtimeBootstrap.accountConfig;
 
-	const client = options.client;
+	const executionClient = options.executionClient;
 	const marketDataClient: MarketDataClient | undefined =
 		options.marketDataClient;
 
@@ -168,9 +168,9 @@ export const runBacktest = async (
 			? new DefaultDataProvider({ client: marketDataClient })
 			: undefined);
 
-	if (!client) {
+	if (!executionClient) {
 		throw new Error(
-			"runBacktest requires a client implementing ExchangeAdapter (inject from app layer)."
+			"runBacktest requires executionClient (ExecutionClient interface) to be provided."
 		);
 	}
 
@@ -185,7 +185,7 @@ export const runBacktest = async (
 		effectiveConfig.initialBalance ?? accountConfig.startingBalance ?? 1000;
 	const paperAccount = new PaperAccount(initialBalance);
 	const executionEngine = new ExecutionEngine({
-		client,
+		client: executionClient,
 		mode: "paper",
 		paperAccount,
 	});

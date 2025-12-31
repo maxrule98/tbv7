@@ -6,7 +6,7 @@ import {
 	PaperPositionSnapshot,
 } from "@agenai/execution-engine";
 import { TradePlan } from "@agenai/risk-engine";
-import { AccountConfig, ExecutionMode, ExchangeAdapter } from "@agenai/core";
+import { AccountConfig, ExecutionMode, ExecutionClient } from "@agenai/core";
 import { StrategyRuntimeMode } from "../runtimeShared";
 
 export interface ExecutionProvider {
@@ -22,7 +22,7 @@ export interface ExecutionProvider {
 }
 
 interface MexcExecutionProviderOptions {
-	client: ExchangeAdapter;
+	client: ExecutionClient;
 	mode: ExecutionMode;
 	accountConfig: AccountConfig;
 }

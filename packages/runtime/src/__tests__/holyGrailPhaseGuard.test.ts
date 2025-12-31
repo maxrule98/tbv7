@@ -203,3 +203,60 @@ describe("Holy Grail Phase D Guard Rails", () => {
 		expect(content).not.toContain("uses `Map<string, Candle[]>` for buffers");
 	});
 });
+
+describe("Holy Grail Phase E Guard Rails", () => {
+	it("should have NO ExchangeAdapter references in runtime backtestRunner", () => {
+		const backtestRunner = fs.readFileSync(
+			path.join(__dirname, "../backtest/backtestRunner.ts"),
+			"utf-8"
+		);
+		expect(backtestRunner).not.toContain("ExchangeAdapter");
+		// Should use ExecutionClient instead
+		expect(backtestRunner).toContain("ExecutionClient");
+	});
+
+	it("should have MarketDataClient and ExecutionClient types exported from core", () => {
+		// These are type-only exports, so we check the source file directly
+		const corePackageDir = path.resolve(__dirname, "../../../core");
+		const exchangeDir = path.join(corePackageDir, "src/exchange");
+
+		const marketDataClientPath = path.join(exchangeDir, "MarketDataClient.ts");
+		const executionClientPath = path.join(exchangeDir, "ExecutionClient.ts");
+
+		expect(
+			fs.existsSync(marketDataClientPath),
+			"MarketDataClient.ts should exist in core/exchange"
+		).toBe(true);
+		expect(
+			fs.existsSync(executionClientPath),
+			"ExecutionClient.ts should exist in core/exchange"
+		).toBe(true);
+
+		// Check that they're exported from index
+		const exchangeIndex = fs.readFileSync(
+			path.join(exchangeDir, "index.ts"),
+			"utf-8"
+		);
+		expect(exchangeIndex).toContain("MarketDataClient");
+		expect(exchangeIndex).toContain("ExecutionClient");
+	});
+
+	it("should confirm HG_PHASE_COMPLETED includes E when ExchangeAdapter removed", () => {
+		const progressPath = path.join(
+			__dirname,
+			"../marketData/HOLY_GRAIL_PROGRESS.md"
+		);
+		const content = fs.readFileSync(progressPath, "utf-8");
+
+		// Check backtestRunner doesn't have ExchangeAdapter
+		const backtestRunner = fs.readFileSync(
+			path.join(__dirname, "../backtest/backtestRunner.ts"),
+			"utf-8"
+		);
+		const hasNoExchangeAdapter = !backtestRunner.includes("ExchangeAdapter");
+
+		if (hasNoExchangeAdapter) {
+			expect(content).toContain("HG_PHASE_COMPLETED=A,B,C,D,E");
+		}
+	});
+});
