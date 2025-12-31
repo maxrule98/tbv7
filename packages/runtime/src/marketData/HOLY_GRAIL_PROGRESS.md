@@ -3,7 +3,7 @@
 **Machine-Searchable Marker:**
 
 ```
-HG_PHASE_COMPLETED=A,B
+HG_PHASE_COMPLETED=A,B,C
 ```
 
 ## Phase Checklist
@@ -24,11 +24,13 @@ HG_PHASE_COMPLETED=A,B
 - [x] Update backtestRunner to build and pass TickSnapshot
 - [x] Add guard tests for phase completion
 
-### Phase C: Extract Gap Repair Logic (NOT STARTED)
+### Phase C: Extract Gap Repair Logic ✅ COMPLETED
 
-- [ ] Create `packages/data/src/utils/gapRepair.ts`
-- [ ] Extract duplicated gap repair from both providers
-- [ ] Add unit tests for gap repair
+- [x] Create `packages/data/src/reconcile/gapRepair.ts`
+- [x] Extract duplicated gap repair from both providers
+- [x] Add unit tests for gap repair (19 test scenarios)
+- [x] Update pollingMarketDataProvider to use shared function
+- [x] Update binanceUsdMMarketDataProvider to use shared function
 
 ### Phase D: Centralize Storage with CandleStore (NOT STARTED)
 
@@ -51,20 +53,80 @@ HG_PHASE_COMPLETED=A,B
 
 ---
 
-## Current Commit Notes (Phase A + B)
+## Current Commit Notes (Phase C)
+
+**✅ PHASE C COMPLETED: 2025-12-31**
+
+### Files Created:
+
+1. `packages/data/src/reconcile/gapRepair.ts` - Shared gap repair logic (115 lines)
+2. `packages/data/src/reconcile/gapRepair.test.ts` - Comprehensive tests (19 test scenarios, 24 passing tests)
+
+### Files Modified:
+
+1. `packages/data/src/index.ts` - Export repairCandleGap function and types
+2. `packages/runtime/src/marketData/pollingMarketDataProvider.ts` - Replace repairGap method with shared function
+3. `packages/runtime/src/marketData/binanceUsdMMarketDataProvider.ts` - Replace repairGap method with shared function
+4. `packages/runtime/src/marketData/HOLY_GRAIL_PROGRESS.md` - Updated marker to A,B,C
+
+### Code Eliminated:
+
+- **70+ lines of duplicated gap repair logic** removed from both providers
+- **Both `private async repairGap` wrapper methods completely eliminated**
+- Gap repair logic now directly uses shared `repairCandleGap()` function at call sites
+- Providers keep their own logging and metadata handling
+
+### Key Improvements:
+
+1. **Pure function with dependency injection**: fetchCandles callback injected
+2. **Deterministic bucketing**: Uses `bucketTimestamp()` from @agenai/core
+3. **Strict boundary filtering**: Excludes candles outside [fromTs, toTs) range
+4. **Sorting and deduplication**: Handles out-of-order and duplicate timestamps
+5. **No wrapper methods**: Direct calls to shared function eliminate indirection
+
+### Test Coverage:
+
+- No gap scenarios (2 tests)
+- Single missing candle (2 tests)
+- Multiple missing candles (2 tests)
+- Out-of-order and duplicate handling (3 tests)
+- Boundary filtering (3 tests)
+- Logging callback (3 tests)
+- Edge cases (4 tests)
+
+### Behavior Preserved:
+
+- ✅ Same gap detection logic
+- ✅ Same candle fetching with padding
+- ✅ Same filtering and sorting
+- ✅ Providers keep their own logging (candle_gap_repaired)
+- ✅ Metadata preserved (source="poll"/"rest", gapFilled=true)
+- ✅ Binance provider still normalizes candles
+
+### Validation Commands Run:
+
+```bash
+pnpm --filter @agenai/data test     # ✅ 24 tests passing (gapRepair tests)
+pnpm -r build                       # ✅ All packages build
+```
+
+---
+
+## Previous Commit Notes (Phase A + B)
 
 **✅ PHASE A + B COMPLETED: 2025-12-31**
 
 ### Files Created:
 
 1. `packages/core/src/time/time.ts` - Pure time utilities (UTC epoch ms only)
-2. `packages/core/src/time.ts` - Barrel export for time utilities
-3. `packages/core/src/time/time.test.ts` - Comprehensive tests for time utilities (24 passing)
-4. `packages/runtime/src/types/tickSnapshot.ts` - Rich TickSnapshot type definition
-5. `packages/runtime/src/loop/buildTickSnapshot.ts` - Snapshot builder with validation
-6. `packages/runtime/src/loop/buildTickSnapshot.test.ts` - Snapshot builder tests (7 passing)
-7. `packages/runtime/src/__tests__/holyGrailPhaseGuard.test.ts` - Guard rails against plan drift (6 passing)
-8. `packages/runtime/src/marketData/HOLY_GRAIL_PROGRESS.md` - This progress tracker
+2. `packages/core/src/time/index.ts` - Time module barrel export (time + constants)
+3. `packages/core/src/time/constants.ts` - Time constants (MINUTE_MS, HOUR_MS, etc.)
+4. `packages/core/src/time/time.test.ts` - Comprehensive tests for time utilities (24 passing)
+5. `packages/runtime/src/types/tickSnapshot.ts` - Rich TickSnapshot type definition
+6. `packages/runtime/src/loop/buildTickSnapshot.ts` - Snapshot builder with validation
+7. `packages/runtime/src/loop/buildTickSnapshot.test.ts` - Snapshot builder tests (7 passing)
+8. `packages/runtime/src/__tests__/holyGrailPhaseGuard.test.ts` - Guard rails against plan drift (6 passing)
+9. `packages/runtime/src/marketData/HOLY_GRAIL_PROGRESS.md` - This progress tracker
 
 ### Files Modified:
 

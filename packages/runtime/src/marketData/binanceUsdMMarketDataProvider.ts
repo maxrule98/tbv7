@@ -1,6 +1,6 @@
 import WebSocket from "ws";
 import { Candle, ExchangeAdapter } from "@agenai/core";
-import { timeframeToMs } from "@agenai/data";
+import { timeframeToMs, repairCandleGap } from "@agenai/data";
 import { runtimeLogger } from "../runtimeShared";
 import { normalizeSymbolForVenue, toCanonicalSymbol } from "../symbols";
 import {
@@ -272,50 +272,6 @@ class BinanceUsdMClosedCandleFeed implements MarketDataFeed {
 		);
 	}
 
-	private async repairGap(
-		timeframe: string,
-		startTimestamp: number,
-		endTimestamp: number,
-		tfMs: number
-	): Promise<void> {
-		const needed = Math.max(
-			Math.floor((endTimestamp - startTimestamp) / tfMs),
-			1
-		);
-		const candles = await this.options.fetchCandles(
-			timeframe,
-			needed + GAP_FETCH_PADDING,
-			startTimestamp
-		);
-		const missingCandles = candles
-			.filter(
-				(candle) =>
-					candle.timestamp >= startTimestamp && candle.timestamp < endTimestamp
-			)
-			.sort((a, b) => a.timestamp - b.timestamp);
-		const normalizedCandles = missingCandles.map((candle) =>
-			this.normalizeCandle(candle, timeframe)
-		);
-		for (const candle of normalizedCandles) {
-			await this.processCandle(
-				timeframe,
-				candle,
-				Date.now(),
-				"rest",
-				true,
-				true
-			);
-		}
-		if (normalizedCandles.length) {
-			runtimeLogger.info("candle_gap_repaired", {
-				venue: this.options.venue,
-				symbol: this.canonicalSymbol,
-				timeframe,
-				repairedCandles: normalizedCandles.length,
-			});
-		}
-	}
-
 	private async emitEvent(
 		timeframe: string,
 		candle: Candle,
@@ -372,7 +328,50 @@ class BinanceUsdMClosedCandleFeed implements MarketDataFeed {
 				lastTimestamp: lastTs,
 				currentTimestamp: candle.timestamp,
 			});
-			await this.repairGap(timeframe, lastTs + tfMs, candle.timestamp, tfMs);
+
+			// Repair gap using shared function
+			const startTimestamp = lastTs + tfMs;
+			const endTimestamp = candle.timestamp;
+			const result = await repairCandleGap({
+				timeframe,
+				lastTs: startTimestamp - tfMs,
+				nextTs: endTimestamp,
+				fetchCandles: async (fromTs) => {
+					const needed = Math.max(
+						Math.floor((endTimestamp - fromTs) / tfMs),
+						1
+					);
+					return this.options.fetchCandles(
+						timeframe,
+						needed + GAP_FETCH_PADDING,
+						fromTs
+					);
+				},
+			});
+
+			const normalizedCandles = result.missing.map((c) =>
+				this.normalizeCandle(c, timeframe)
+			);
+
+			for (const repairedCandle of normalizedCandles) {
+				await this.processCandle(
+					timeframe,
+					repairedCandle,
+					Date.now(),
+					"rest",
+					true,
+					true
+				);
+			}
+
+			if (normalizedCandles.length) {
+				runtimeLogger.info("candle_gap_repaired", {
+					venue: this.options.venue,
+					symbol: this.canonicalSymbol,
+					timeframe,
+					repairedCandles: normalizedCandles.length,
+				});
+			}
 		}
 		if (!this.reserveTimestamp(key, candle.timestamp)) {
 			return;

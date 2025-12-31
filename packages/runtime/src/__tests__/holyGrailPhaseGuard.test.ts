@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 describe("Holy Grail Phase A+B Guard Rails", () => {
-	it("should confirm HG_PHASE_COMPLETED=A,B marker exists", () => {
+	it("should confirm HG_PHASE_COMPLETED=A,B,C marker exists", () => {
 		const progressPath = path.join(
 			__dirname,
 			"../marketData/HOLY_GRAIL_PROGRESS.md"
@@ -14,7 +14,7 @@ describe("Holy Grail Phase A+B Guard Rails", () => {
 		).toBe(true);
 
 		const content = fs.readFileSync(progressPath, "utf-8");
-		expect(content).toContain("HG_PHASE_COMPLETED=A,B");
+		expect(content).toContain("HG_PHASE_COMPLETED=A,B,C");
 	});
 
 	it("should export TickSnapshot types from runtime", async () => {
@@ -83,5 +83,56 @@ describe("Holy Grail Phase A+B Guard Rails", () => {
 				series: {},
 			})
 		).toThrow("context: executionCandle");
+	});
+});
+
+describe("Holy Grail Phase C Guard Rails", () => {
+	it("should have NO repairGap wrapper methods in providers", () => {
+		const marketDataDir = path.join(__dirname, "../marketData");
+		const pollingProvider = fs.readFileSync(
+			path.join(marketDataDir, "pollingMarketDataProvider.ts"),
+			"utf-8"
+		);
+		const binanceProvider = fs.readFileSync(
+			path.join(marketDataDir, "binanceUsdMMarketDataProvider.ts"),
+			"utf-8"
+		);
+
+		// Should NOT contain private repairGap wrapper method
+		expect(pollingProvider).not.toContain("repairGap(");
+		expect(binanceProvider).not.toContain("repairGap(");
+
+		// Explanation: Phase C eliminated all provider-owned repairGap() wrappers.
+		// If this test fails, someone re-added a wrapper method.
+		// Gap repair must use the shared repairCandleGap() function directly.
+	});
+
+	it("should use shared repairCandleGap function in both providers", () => {
+		const marketDataDir = path.join(__dirname, "../marketData");
+		const pollingProvider = fs.readFileSync(
+			path.join(marketDataDir, "pollingMarketDataProvider.ts"),
+			"utf-8"
+		);
+		const binanceProvider = fs.readFileSync(
+			path.join(marketDataDir, "binanceUsdMMarketDataProvider.ts"),
+			"utf-8"
+		);
+
+		// Should import repairCandleGap from @agenai/data
+		expect(pollingProvider).toContain('from "@agenai/data"');
+		expect(pollingProvider).toContain("repairCandleGap");
+
+		expect(binanceProvider).toContain('from "@agenai/data"');
+		expect(binanceProvider).toContain("repairCandleGap");
+
+		// Should have at least one direct call to repairCandleGap(
+		expect(pollingProvider).toMatch(/await repairCandleGap\({/);
+		expect(binanceProvider).toMatch(/await repairCandleGap\({/);
+	});
+
+	it("should have gap repair function in @agenai/data", async () => {
+		const dataModule = await import("@agenai/data");
+		expect(dataModule.repairCandleGap).toBeDefined();
+		expect(typeof dataModule.repairCandleGap).toBe("function");
 	});
 });

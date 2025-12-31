@@ -3,6 +3,7 @@ import {
 	DefaultDataProvider,
 	LiveSubscription,
 	timeframeToMs,
+	repairCandleGap,
 } from "@agenai/data";
 import { runtimeLogger } from "../runtimeShared";
 import {
@@ -146,44 +147,38 @@ class PollingMarketDataFeed implements MarketDataFeed {
 				timeframe,
 				gapSize: missing,
 			});
-			await this.repairGap(timeframe, lastTs + tfMs, candle.timestamp, tfMs);
+
+			// Repair gap using shared function
+			const startTimestamp = lastTs + tfMs;
+			const endTimestamp = candle.timestamp;
+			const result = await repairCandleGap({
+				timeframe,
+				lastTs: startTimestamp - tfMs,
+				nextTs: endTimestamp,
+				fetchCandles: async (fromTs) => {
+					const needed = Math.max(
+						Math.floor((endTimestamp - fromTs) / tfMs),
+						1
+					);
+					return this.options.fetchCandles(timeframe, needed + 2, fromTs);
+				},
+			});
+
+			for (const repairedCandle of result.missing) {
+				await this.emitEvent(repairedCandle, "poll", true);
+				this.lastProcessed.set(timeframe, repairedCandle.timestamp);
+			}
+
+			if (result.missing.length) {
+				runtimeLogger.info("candle_gap_repaired", {
+					venue: this.options.venue,
+					timeframe,
+					repairedCandles: result.missing.length,
+				});
+			}
 		}
 		await this.emitEvent(candle, "poll", false);
 		this.lastProcessed.set(timeframe, candle.timestamp);
-	}
-
-	private async repairGap(
-		timeframe: string,
-		startTimestamp: number,
-		endTimestamp: number,
-		tfMs: number
-	): Promise<void> {
-		const needed = Math.max(
-			Math.floor((endTimestamp - startTimestamp) / tfMs),
-			1
-		);
-		const candles = await this.options.fetchCandles(
-			timeframe,
-			needed + 2,
-			startTimestamp
-		);
-		const missingCandles = candles
-			.filter(
-				(candle) =>
-					candle.timestamp >= startTimestamp && candle.timestamp < endTimestamp
-			)
-			.sort((a, b) => a.timestamp - b.timestamp);
-		for (const candle of missingCandles) {
-			await this.emitEvent(candle, "rest", true);
-			this.lastProcessed.set(timeframe, candle.timestamp);
-		}
-		if (missingCandles.length) {
-			runtimeLogger.info("candle_gap_repaired", {
-				venue: this.options.venue,
-				timeframe,
-				repairedCandles: missingCandles.length,
-			});
-		}
 	}
 
 	private async emitEvent(
