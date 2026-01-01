@@ -6,6 +6,7 @@ import {
 	ExecutionMode,
 	RiskConfig,
 	StrategyId,
+	type MarketDataClient,
 } from "@agenai/core";
 import { RiskManager } from "@agenai/risk-engine";
 import { resolveStrategyBuilder } from "./strategyBuilders";
@@ -32,11 +33,14 @@ import {
 } from "./runtimeSnapshot";
 import { buildRuntimeFingerprintLogPayload } from "./runtimeFingerprint";
 import type { StrategyRuntimeFingerprints } from "./fingerprints";
-import { type ClosedCandleEvent, type MarketDataProvider } from "./marketData";
+import {
+	type ClosedCandleEvent,
+	type BaseCandleSource,
+	MarketDataPlant,
+} from "./marketData";
 import { type ExecutionProvider } from "./execution/executionProvider";
 export type { TraderStrategy } from "./types";
 
-export const DEFAULT_POLL_INTERVAL_MS = 10_000;
 const BOOTSTRAP_CANDLE_LIMIT = 300;
 const FIFTEEN_MIN_MS = 15 * 60 * 1_000;
 
@@ -45,7 +49,6 @@ export interface TraderConfig {
 	timeframe?: string;
 	useTestnet: boolean;
 	executionMode?: ExecutionMode;
-	pollIntervalMs?: number;
 	strategyId?: StrategyId;
 }
 
@@ -62,13 +65,15 @@ export interface StartTraderOptions {
 	riskProfile?: string;
 	strategyOverride?: TraderStrategy;
 	strategyBuilder?: StrategyRuntimeBuilder;
-	marketDataProvider?: MarketDataProvider;
-	executionProvider?: ExecutionProvider;
+	// Phase F: Required dependencies
+	executionProvider: ExecutionProvider;
+	baseCandleSource: BaseCandleSource;
+	marketDataClient: MarketDataClient;
 }
 
 export const startTrader = async (
 	traderConfig: TraderConfig,
-	options: StartTraderOptions = {}
+	options: StartTraderOptions
 ): Promise<never> => {
 	const runtimeSnapshot =
 		options.runtimeSnapshot ??
@@ -109,30 +114,25 @@ export const startTrader = async (
 	const signalTimeframes = venues.signalTimeframes.length
 		? venues.signalTimeframes
 		: [executionTimeframe];
-	const pollIntervalMs =
-		traderConfig.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 	const profileMetadata = runtimeBootstrap.profiles;
 
-	if (!options.marketDataProvider) {
-		throw new Error(
-			"marketDataProvider is required. Inject an adapter from the app layer."
-		);
-	}
+	// Phase F: Strict validation - all dependencies required
 	if (!options.executionProvider) {
-		throw new Error(
-			"executionProvider is required. Inject an adapter from the app layer."
-		);
+		throw new Error("executionProvider is required.");
+	}
+	if (!options.baseCandleSource) {
+		throw new Error("baseCandleSource is required for Phase F runtime.");
+	}
+	if (!options.marketDataClient) {
+		throw new Error("marketDataClient is required for Phase F runtime.");
 	}
 
-	const marketDataProvider = options.marketDataProvider;
 	const executionProvider = options.executionProvider;
 
 	const effectiveBuilder =
 		options.strategyBuilder ??
-		resolveStrategyBuilder(
-			resolvedStrategyId,
-			(symbolArg, timeframeArg, limit) =>
-				marketDataProvider.fetchCandles(symbolArg, timeframeArg, limit)
+		resolveStrategyBuilder(resolvedStrategyId, (symbol, timeframe, limit) =>
+			options.marketDataClient.fetchOHLCV(symbol, timeframe, limit)
 		);
 
 	const runtime = await createRuntime(runtimeSnapshot, {
@@ -159,7 +159,6 @@ export const startTrader = async (
 		extra: {
 			symbol: instrument.symbol,
 			timeframe: instrument.timeframe,
-			pollIntervalMs,
 			signalVenue: venues.signalVenue,
 			executionVenue: venues.executionVenue,
 			signalTimeframes,
@@ -182,7 +181,7 @@ export const startTrader = async (
 		executionVenue: venues.executionVenue,
 		signalTimeframes,
 		executionTimeframe,
-		marketDataProvider: marketDataProvider.venue,
+		baseCandleSource: options.baseCandleSource.venue,
 		executionProvider: executionProvider.venue,
 	});
 
@@ -211,20 +210,13 @@ export const startTrader = async (
 		executionMode,
 		builderName: runtime.builderName,
 		profiles: profileMetadata,
-		pollIntervalMs,
 	});
 	logRiskConfig(agenaiConfig.risk);
 
-	const bootstrapState = await bootstrapMarketData({
-		provider: marketDataProvider,
-		symbol: instrument.symbol,
-		timeframes: signalTimeframes,
-		limit: BOOTSTRAP_CANDLE_LIMIT,
-		mode: runtimeMode,
-	});
-
+	// Phase F: Start Plant-driven runtime
 	return startClosedCandleRuntime({
-		provider: marketDataProvider,
+		baseCandleSource: options.baseCandleSource,
+		marketDataClient: options.marketDataClient,
 		strategy,
 		riskManager,
 		riskConfig: agenaiConfig.risk,
@@ -233,80 +225,15 @@ export const startTrader = async (
 		instrument,
 		signalTimeframes,
 		executionTimeframe,
-		pollIntervalMs,
-		bootstrap: bootstrapState,
 		mode: runtimeMode,
 		fingerprints: runtimeFingerprints,
 		venues,
 	});
 };
 
-interface BootstrapState {
-	candlesByTimeframe: Map<string, Candle[]>;
-	lastTimestampByTimeframe: Map<string, number>;
-}
-
-interface BootstrapOptions {
-	provider: MarketDataProvider;
-	symbol: string;
-	timeframes: string[];
-	limit: number;
-	mode: StrategyRuntimeMode;
-}
-
-const bootstrapMarketData = async (
-	options: BootstrapOptions
-): Promise<BootstrapState> => {
-	try {
-		const result = await options.provider.bootstrap({
-			symbol: options.symbol,
-			timeframes: options.timeframes,
-			limit: options.limit,
-		});
-		const candlesByTimeframe = new Map<string, Candle[]>();
-		const lastTimestampByTimeframe = new Map<string, number>();
-		for (const timeframe of options.timeframes) {
-			const source = result.candlesByTimeframe.get(timeframe) ?? [];
-			const trimmed =
-				source.length <= options.limit
-					? [...source]
-					: source.slice(source.length - options.limit);
-			candlesByTimeframe.set(timeframe, trimmed);
-			if (trimmed.length) {
-				const latest = trimmed[trimmed.length - 1]?.timestamp ?? 0;
-				lastTimestampByTimeframe.set(timeframe, latest);
-				logTimeframeFingerprint({
-					mode: options.mode,
-					label: "live_bootstrap",
-					symbol: options.symbol,
-					timeframe,
-					candles: trimmed,
-				});
-			} else {
-				runtimeLogger.warn("bootstrap_missing_candles", {
-					symbol: options.symbol,
-					timeframe,
-					venue: options.provider.venue,
-				});
-			}
-		}
-		runtimeLogger.info("market_data_bootstrap_complete", {
-			symbol: options.symbol,
-			timeframes: options.timeframes,
-			venue: options.provider.venue,
-		});
-		return { candlesByTimeframe, lastTimestampByTimeframe };
-	} catch (error) {
-		logMarketDataError(error);
-		return {
-			candlesByTimeframe: new Map(),
-			lastTimestampByTimeframe: new Map(),
-		};
-	}
-};
-
 interface ClosedCandleRuntimeOptions {
-	provider: MarketDataProvider;
+	baseCandleSource: BaseCandleSource;
+	marketDataClient: MarketDataClient;
 	strategy: TraderStrategy;
 	riskManager: RiskManager;
 	riskConfig: RiskConfig;
@@ -315,8 +242,6 @@ interface ClosedCandleRuntimeOptions {
 	instrument: { symbol: string; timeframe: string };
 	signalTimeframes: string[];
 	executionTimeframe: string;
-	pollIntervalMs: number;
-	bootstrap: BootstrapState;
 	mode: StrategyRuntimeMode;
 	fingerprints: StrategyRuntimeFingerprints;
 	venues: VenueSelection;
@@ -333,48 +258,29 @@ const startClosedCandleRuntime = async (
 		maxCandlesByTimeframe[tf] = historyWindow;
 	}
 
-	// Initialize CandleStore
+	// Initialize CandleStore (Plant will populate it)
 	const candleStore = new CandleStore({
 		defaultMaxCandles: historyWindow,
 		maxCandlesByTimeframe,
 	});
 
-	// Ingest bootstrap candles
-	for (const timeframe of options.signalTimeframes) {
-		const candles = options.bootstrap.candlesByTimeframe.get(timeframe) ?? [];
-		if (candles.length > 0) {
-			candleStore.ingestMany(timeframe, candles);
-		}
-	}
-
-	const lastTimestampByTimeframe = new Map(
-		options.bootstrap.lastTimestampByTimeframe
-	);
 	const lastFingerprintByTimeframe = new Map<string, number>();
 	let fallbackEquity = options.initialEquity;
 
-	const feed = options.provider.createFeed({
+	// Phase F: Create MarketDataPlant
+	const plant = new MarketDataPlant({
+		venue: options.venues.signalVenue,
 		symbol: options.instrument.symbol,
-		timeframes: options.signalTimeframes,
-		executionTimeframe: options.executionTimeframe,
-		pollIntervalMs: options.pollIntervalMs,
+		marketDataClient: options.marketDataClient,
+		candleStore,
+		source: options.baseCandleSource,
+		logger: runtimeLogger,
 	});
 
 	let queue = Promise.resolve();
 
 	const handleEvent = async (event: ClosedCandleEvent): Promise<void> => {
-		const lastTs = lastTimestampByTimeframe.get(event.timeframe) ?? 0;
-		if (lastTs && event.candle.timestamp <= lastTs) {
-			runtimeLogger.debug("candle_duplicate_skipped", {
-				timeframe: event.timeframe,
-				symbol: event.symbol,
-				lastTimestamp: lastTs,
-			});
-			return;
-		}
-
-		lastTimestampByTimeframe.set(event.timeframe, event.candle.timestamp);
-		candleStore.ingest(event.timeframe, event.candle);
+		// Plant already ingested to candleStore, no need to re-ingest
 		logClosedCandleEvent(event);
 
 		if (event.timeframe === options.executionTimeframe) {
@@ -419,7 +325,7 @@ const startClosedCandleRuntime = async (
 		}
 	};
 
-	feed.onCandle((event) => {
+	plant.onCandle((event) => {
 		queue = queue
 			.then(() => handleEvent(event))
 			.catch((error) => {
@@ -430,7 +336,20 @@ const startClosedCandleRuntime = async (
 		return queue;
 	});
 
-	feed.start();
+	// Plant bootstraps history and starts source
+	await plant.start({
+		timeframes: options.signalTimeframes,
+		executionTimeframe: options.executionTimeframe,
+		historyLimit: BOOTSTRAP_CANDLE_LIMIT,
+	});
+
+	runtimeLogger.info("plant_runtime_started", {
+		symbol: options.instrument.symbol,
+		venue: options.venues.signalVenue,
+		timeframes: options.signalTimeframes,
+		executionTimeframe: options.executionTimeframe,
+	});
+
 	return new Promise<never>(() => {
 		// Keeps the process alive; shutdown handled externally.
 	});

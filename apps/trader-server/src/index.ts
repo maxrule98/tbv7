@@ -9,7 +9,8 @@ import {
 import {
 	createExchangeAdapter,
 	createExecutionProvider,
-	createMarketDataProvider,
+	createBaseCandleSource,
+	createMarketDataClient,
 } from "@agenai/app-di";
 
 const logger = createLogger("trader-server");
@@ -43,7 +44,10 @@ const main = async (): Promise<void> => {
 	const pollInterval = 10_000;
 
 	const exchangeAdapter = createExchangeAdapter(runtimeSnapshot);
-	const marketDataProvider = createMarketDataProvider(
+
+	// Phase F: Create required dependencies
+	const marketDataClient = createMarketDataClient(exchangeAdapter);
+	const baseCandleSource = createBaseCandleSource(
 		runtimeSnapshot,
 		exchangeAdapter,
 		pollInterval
@@ -61,7 +65,12 @@ const main = async (): Promise<void> => {
 			executionMode: runtimeBootstrap.agenaiConfig.env.executionMode,
 			strategyId: runtimeBootstrap.strategyId,
 		},
-		{ runtimeSnapshot, marketDataProvider, executionProvider }
+		{
+			runtimeSnapshot,
+			marketDataClient,
+			baseCandleSource,
+			executionProvider,
+		}
 	).catch((error) => {
 		logger.error("runtime_failed", {
 			message: error instanceof Error ? error.message : String(error),

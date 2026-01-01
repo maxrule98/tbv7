@@ -51,3 +51,34 @@ export interface MarketDataProvider {
 		since?: number
 	): Promise<Candle[]>;
 }
+
+/**
+ * Phase F: Base candle source interface
+ *
+ * Providers implementing this interface emit ONLY base timeframe candles.
+ * They do NOT handle aggregation, gap repair, or multi-timeframe logic.
+ * MarketDataPlant orchestrates these concerns.
+ */
+export interface BaseCandleSource {
+	readonly venue: string;
+
+	/**
+	 * Start emitting closed candles for a single timeframe
+	 * @param args.symbol - Trading pair symbol
+	 * @param args.timeframe - Single base timeframe to emit
+	 * @param args.onCandle - Callback for each closed candle
+	 */
+	start(args: {
+		symbol: string;
+		timeframe: string;
+		onCandle: (
+			candle: Candle,
+			meta: { receivedAt: number; source: "ws" | "poll" | "rest" }
+		) => void;
+	}): Promise<void>;
+
+	/**
+	 * Stop emitting candles and clean up resources
+	 */
+	stop(): Promise<void>;
+}

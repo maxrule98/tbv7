@@ -7,7 +7,8 @@ import {
 import {
 	createExchangeAdapter,
 	createExecutionProvider,
-	createMarketDataProvider,
+	createBaseCandleSource,
+	createMarketDataClient,
 } from "@agenai/app-di";
 
 const logger = createLogger("trader-cli");
@@ -54,7 +55,10 @@ const main = async (): Promise<void> => {
 
 	const signalAdapter = createExchangeAdapter(runtimeSnapshot);
 	const executionAdapter = createExchangeAdapter(runtimeSnapshot);
-	const marketDataProvider = createMarketDataProvider(
+
+	// Phase F: Create required dependencies
+	const marketDataClient = createMarketDataClient(signalAdapter);
+	const baseCandleSource = createBaseCandleSource(
 		runtimeSnapshot,
 		signalAdapter,
 		10_000
@@ -72,7 +76,12 @@ const main = async (): Promise<void> => {
 			executionMode: runtimeBootstrap.agenaiConfig.env.executionMode,
 			strategyId: resolvedStrategyId,
 		},
-		{ runtimeSnapshot, marketDataProvider, executionProvider }
+		{
+			runtimeSnapshot,
+			marketDataClient,
+			baseCandleSource,
+			executionProvider,
+		}
 	);
 };
 

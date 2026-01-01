@@ -7,3 +7,4 @@ export {
 	createExecutionProvider,
 	createBacktestExecution,
 } from "./createExecutionProvider";
+export { createBaseCandleSource, createMarketDataClient } from "./createPhaseF";

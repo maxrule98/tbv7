@@ -3,7 +3,7 @@
 **Machine-Searchable Marker:**
 
 ```
-HG_PHASE_COMPLETED=A,B,C,D,E
+HG_PHASE_COMPLETED=A,B,C,D,E,F
 ```
 
 ## Phase Checklist
@@ -75,11 +75,53 @@ HG_PHASE_COMPLETED=A,B,C,D,E
 - Type safety: TypeScript enforces correct client usage in DI layer
 - Clean modularity: Removed unused parameters and identity functions
 
-### Phase F: Introduce MarketDataPlant (NOT STARTED)
+### Phase F: MarketDataPlant and BaseCandleSource ✅ COMPLETED
 
-- [ ] Create MarketDataPlant orchestrator
-- [ ] Migrate subscription logic
-- [ ] Wire Plant → CandleStore → runTick
+- [x] Create BaseCandleSource interface in marketData/types.ts
+- [x] Create BinanceBaseCandleSource (178 lines) - WebSocket source, no orchestration
+- [x] Create PollingBaseCandleSource (162 lines) - polling source, no orchestration
+- [x] Update MarketDataPlant to accept BaseCandleSource via constructor
+- [x] Remove internal polling from MarketDataPlant (startPolling/pollOnce deleted, 67 lines)
+- [x] Update MarketDataPlant tests with MockBaseCandleSource (6/6 passing)
+- [x] Wire MarketDataPlant into startTrader.ts (removed provider.createFeed)
+- [x] Remove bootstrapMarketData function (replaced by Plant.start)
+- [x] Update StartTraderOptions with baseCandleSource and marketDataClient
+- [x] Add Phase F guard tests (6 new tests)
+- [x] Update progress marker to HG_PHASE_COMPLETED=A,B,C,D,E,F
+
+**Implementation Notes:**
+
+- **BaseCandleSource**: Simplified provider interface emitting ONE base timeframe
+- **BinanceBaseCandleSource**: WebSocket-only, emits closed candles (kline.x=true)
+- **PollingBaseCandleSource**: REST polling-only, emits new candles from last 5 fetched
+- **MarketDataPlant**: Orchestrator accepting source, handles gap repair and aggregation
+- **Data Flow**: `BaseCandleSource → Plant.processBaseCandle() → gap repair → aggregation → CandleStore → events`
+- **Plant Responsibilities**: Bootstrap history, start source, detect gaps, repair via REST, aggregate timeframes, emit events
+- **Source Responsibilities**: Connect, emit raw base candles via callback, disconnect
+- **startTrader Changes**: Removed provider.createFeed(), bootstrapMarketData(). Now creates Plant with source from DI.
+- **Test Strategy**: MockBaseCandleSource.emit() triggers synchronous candle processing
+- **Import Boundaries**: Still preserved - runtime does NOT import @agenai/exchange-\*
+
+---
+
+## Current Commit Notes (Phase F)
+
+**✅ PHASE F COMPLETED: 2025-12-31**
+
+### Files Created:
+
+1. `packages/runtime/src/marketData/BinanceBaseCandleSource.ts` - WebSocket source (178 lines)
+2. `packages/runtime/src/marketData/PollingBaseCandleSource.ts` - Polling source (162 lines)
+
+### Files Modified:
+
+1. `packages/runtime/src/marketData/types.ts` - Added BaseCandleSource interface
+2. `packages/runtime/src/marketData/index.ts` - Export new sources
+3. `packages/runtime/src/marketData/MarketDataPlant.ts` - Accept source, remove polling (reduced from 444 to ~380 lines)
+4. `packages/runtime/src/marketData/MarketDataPlant.test.ts` - Added MockBaseCandleSource, updated tests
+5. `packages/runtime/src/startTrader.ts` - Wire Plant, remove provider.createFeed, remove bootstrapMarketData
+6. `packages/runtime/src/__tests__/holyGrailPhaseGuard.test.ts` - Added 6 Phase F guard tests
+7. `packages/runtime/src/marketData/HOLY_GRAIL_PROGRESS.md` - Updated marker to A,B,C,D,E,F
 
 ---
 

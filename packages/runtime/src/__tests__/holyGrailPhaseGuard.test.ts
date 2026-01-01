@@ -174,9 +174,10 @@ describe("Holy Grail Phase D Guard Rails", () => {
 		// Should import and use CandleStore for runtime storage
 		expect(startTrader).toContain("CandleStore");
 		expect(startTrader).toContain("new CandleStore");
-		// Bootstrap can use Map temporarily, but runtime should use CandleStore
-		expect(startTrader).toContain("candleStore.ingest");
+		// Phase F: Plant does ingestion, startTrader reads via getSeries
+		// (no more manual candleStore.ingest in startTrader)
 		expect(startTrader).toContain("candleStore.getSeries");
+		expect(startTrader).toContain("MarketDataPlant");
 	});
 
 	it("should confirm HG_PHASE_COMPLETED=A,B,C,D marker exists", () => {
@@ -257,6 +258,99 @@ describe("Holy Grail Phase E Guard Rails", () => {
 
 		if (hasNoExchangeAdapter) {
 			expect(content).toContain("HG_PHASE_COMPLETED=A,B,C,D,E");
+		}
+	});
+});
+
+describe("Holy Grail Phase F Guard Rails", () => {
+	it("should have BaseCandleSource interface in marketData types", () => {
+		const typesPath = path.join(__dirname, "../marketData/types.ts");
+		const types = fs.readFileSync(typesPath, "utf-8");
+		expect(types).toContain("export interface BaseCandleSource");
+		expect(types).toContain("start");
+		expect(types).toContain("stop");
+		expect(types).toContain("venue");
+	});
+
+	it("should have BinanceBaseCandleSource and PollingBaseCandleSource implementations", () => {
+		const binanceSourcePath = path.join(
+			__dirname,
+			"../marketData/BinanceBaseCandleSource.ts"
+		);
+		const pollingSourcePath = path.join(
+			__dirname,
+			"../marketData/PollingBaseCandleSource.ts"
+		);
+
+		expect(fs.existsSync(binanceSourcePath)).toBe(true);
+		expect(fs.existsSync(pollingSourcePath)).toBe(true);
+
+		const binanceSource = fs.readFileSync(binanceSourcePath, "utf-8");
+		const pollingSource = fs.readFileSync(pollingSourcePath, "utf-8");
+
+		// Check they implement BaseCandleSource
+		expect(binanceSource).toContain("implements BaseCandleSource");
+		expect(pollingSource).toContain("implements BaseCandleSource");
+
+		// Check they don't have orchestration logic (methods)
+		expect(binanceSource).not.toContain("repairCandleGap");
+		expect(binanceSource).not.toContain("aggregateNewlyClosed");
+		expect(binanceSource).not.toContain("candleStore.ingest");
+
+		expect(pollingSource).not.toContain("repairCandleGap");
+		expect(pollingSource).not.toContain("aggregateNewlyClosed");
+		expect(pollingSource).not.toContain("candleStore.ingest");
+	});
+
+	it("should have MarketDataPlant accept BaseCandleSource in constructor", () => {
+		const plantPath = path.join(__dirname, "../marketData/MarketDataPlant.ts");
+		const plant = fs.readFileSync(plantPath, "utf-8");
+
+		expect(plant).toContain("source: BaseCandleSource");
+		expect(plant).toContain("private readonly source: BaseCandleSource");
+		// Plant should start source, not poll itself
+		expect(plant).toContain("this.source.start");
+		expect(plant).toContain("this.source.stop");
+		// Plant should NOT have internal polling
+		expect(plant).not.toContain("private pollTimer");
+	});
+
+	it("should have startTrader use MarketDataPlant instead of provider.createFeed", () => {
+		const startTraderPath = path.join(__dirname, "../startTrader.ts");
+		const startTrader = fs.readFileSync(startTraderPath, "utf-8");
+
+		expect(startTrader).toContain("MarketDataPlant");
+		expect(startTrader).toContain("new MarketDataPlant");
+		expect(startTrader).not.toContain("provider.createFeed");
+		expect(startTrader).not.toContain("bootstrapMarketData");
+		expect(startTrader).toContain("plant.start");
+		expect(startTrader).toContain("plant.onCandle");
+	});
+
+	it("should have baseCandleSource and marketDataClient in StartTraderOptions", () => {
+		const startTraderPath = path.join(__dirname, "../startTrader.ts");
+		const startTrader = fs.readFileSync(startTraderPath, "utf-8");
+
+		// Phase F: Strict enforcement - these are REQUIRED, not optional
+		expect(startTrader).toContain("baseCandleSource: BaseCandleSource");
+		expect(startTrader).toContain("marketDataClient: MarketDataClient");
+		expect(startTrader).toContain("executionProvider: ExecutionProvider");
+	});
+
+	it("should confirm HG_PHASE_COMPLETED=A,B,C,D,E,F marker exists when Plant is wired", () => {
+		const progressPath = path.join(
+			__dirname,
+			"../marketData/HOLY_GRAIL_PROGRESS.md"
+		);
+		const content = fs.readFileSync(progressPath, "utf-8");
+
+		// Check that startTrader uses Plant
+		const startTraderPath = path.join(__dirname, "../startTrader.ts");
+		const startTrader = fs.readFileSync(startTraderPath, "utf-8");
+		const usesPlant = startTrader.includes("new MarketDataPlant");
+
+		if (usesPlant) {
+			expect(content).toContain("HG_PHASE_COMPLETED=A,B,C,D,E,F");
 		}
 	});
 });

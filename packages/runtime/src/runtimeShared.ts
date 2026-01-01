@@ -48,7 +48,6 @@ export interface StrategyLogContext {
 		useTestnet: boolean;
 	};
 	executionMode: string;
-	pollIntervalMs: number;
 	builderName?: string;
 	profiles?: {
 		account?: string;
@@ -136,7 +135,6 @@ export const logStrategyLoaded = ({
 	executionMode,
 	builderName,
 	profiles,
-	pollIntervalMs,
 }: StrategyLogContext): void => {
 	runtimeLogger.info("strategy_loaded", {
 		source,
@@ -146,7 +144,6 @@ export const logStrategyLoaded = ({
 		timeframe: traderConfig.timeframe,
 		executionMode,
 		useTestnet: traderConfig.useTestnet,
-		pollIntervalMs,
 		builder: builderName ?? null,
 		profiles: profiles ?? null,
 		configId: strategyConfig?.id ?? null,

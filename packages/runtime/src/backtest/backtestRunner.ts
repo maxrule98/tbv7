@@ -295,7 +295,6 @@ export const runBacktest = async (
 		executionMode: "paper",
 		builderName: runtime.builderName,
 		profiles: profileMetadata,
-		pollIntervalMs: 0,
 	});
 	logRiskConfig(agenaiConfig.risk);
 
