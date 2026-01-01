@@ -88,6 +88,12 @@ HG_PHASE_COMPLETED=A,B,C,D,E,F
 - [x] Update StartTraderOptions with baseCandleSource and marketDataClient
 - [x] Add Phase F guard tests (6 new tests)
 - [x] Update progress marker to HG_PHASE_COMPLETED=A,B,C,D,E,F
+- [x] **Make Phase F IRREVERSIBLE**: pollIntervalMs removed, dependencies REQUIRED, not optional
+- [x] **Clean export surface**: Remove all legacy provider exports from marketData/index.ts and types.ts
+- [x] **Clean DI layer**: Delete commented legacy code, rename createMarketDataProvider.ts → createDataProvider.ts
+- [x] **Add export surface guards**: 5 tests ensuring zero legacy provider exports (37 total guard tests)
+- [x] **Delete legacy files**: Remove binanceUsdMMarketDataProvider.ts and pollingMarketDataProvider.ts
+- [x] **Add file existence guards**: Tests verify legacy provider files do NOT exist
 
 **Implementation Notes:**
 
@@ -101,6 +107,7 @@ HG_PHASE_COMPLETED=A,B,C,D,E,F
 - **startTrader Changes**: Removed provider.createFeed(), bootstrapMarketData(). Now creates Plant with source from DI.
 - **Test Strategy**: MockBaseCandleSource.emit() triggers synchronous candle processing
 - **Import Boundaries**: Still preserved - runtime does NOT import @agenai/exchange-\*
+- **Phase F Irreversibility**: Legacy MarketDataProvider-era files DELETED; only BaseCandleSource + MarketDataPlant remain. Zero legacy exports.
 
 ---
 

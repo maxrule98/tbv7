@@ -5,7 +5,6 @@ import {
 	createDataProvider,
 	createExchangeAdapter,
 	createExecutionProvider,
-	createMarketDataProvider,
 } from "./index";
 
 vi.mock("@agenai/exchange-mexc", () => ({
@@ -45,16 +44,6 @@ vi.mock("@agenai/data", () => ({
 
 vi.mock("@agenai/runtime", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@agenai/runtime")>();
-	class MockPollingMarketDataProvider {
-		venue: string;
-		constructor(_client: unknown, { venue }: { venue: string }) {
-			this.venue = venue;
-		}
-	}
-	class MockBinanceUsdMMarketDataProvider {
-		venue = "binance";
-		constructor(_client: unknown) {}
-	}
 	class MockMexcExecutionProvider {
 		venue = "mexc";
 		mode: string;
@@ -80,8 +69,6 @@ vi.mock("@agenai/runtime", async (importOriginal) => {
 	}
 	return {
 		...actual,
-		PollingMarketDataProvider: MockPollingMarketDataProvider,
-		BinanceUsdMMarketDataProvider: MockBinanceUsdMMarketDataProvider,
 		MexcExecutionProvider: MockMexcExecutionProvider,
 	};
 });
@@ -156,23 +143,6 @@ const isFunction = (fn: unknown): fn is (...args: any[]) => any =>
 	typeof fn === "function";
 
 describe("app-di factories", () => {
-	it("creates live exchange, market data, and execution providers for mexc", () => {
-		const snapshot = makeSnapshot("mexc");
-		const adapter = createExchangeAdapter(snapshot);
-		expect(isFunction(adapter.fetchOHLCV)).toBe(true);
-		const md = createMarketDataProvider(snapshot, adapter, 1_000);
-		expect((md as { venue?: string }).venue).toBe("mexc");
-		const exec = createExecutionProvider(snapshot, adapter);
-		expect(exec.getPosition("BTC/USDT").side).toBe("FLAT");
-	});
-
-	it("creates live market data provider for binance", () => {
-		const snapshot = makeSnapshot("binance");
-		const adapter = createExchangeAdapter(snapshot);
-		const md = createMarketDataProvider(snapshot, adapter, 1_000);
-		expect((md as { venue?: string }).venue).toBe("binance");
-	});
-
 	it("creates backtest adapter, data provider, and execution provider", () => {
 		const snapshot = makeSnapshot();
 		const adapter = createExchangeAdapter(snapshot);

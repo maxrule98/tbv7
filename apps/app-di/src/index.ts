@@ -1,8 +1,6 @@
+// Phase F DI exports only
 export { createExchangeAdapter } from "./createExchangeAdapter";
-export {
-	createMarketDataProvider,
-	createDataProvider,
-} from "./createMarketDataProvider";
+export { createDataProvider } from "./createDataProvider";
 export {
 	createExecutionProvider,
 	createBacktestExecution,

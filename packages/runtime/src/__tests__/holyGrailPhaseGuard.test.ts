@@ -87,48 +87,8 @@ describe("Holy Grail Phase A+B Guard Rails", () => {
 });
 
 describe("Holy Grail Phase C Guard Rails", () => {
-	it("should have NO repairGap wrapper methods in providers", () => {
-		const marketDataDir = path.join(__dirname, "../marketData");
-		const pollingProvider = fs.readFileSync(
-			path.join(marketDataDir, "pollingMarketDataProvider.ts"),
-			"utf-8"
-		);
-		const binanceProvider = fs.readFileSync(
-			path.join(marketDataDir, "binanceUsdMMarketDataProvider.ts"),
-			"utf-8"
-		);
-
-		// Should NOT contain private repairGap wrapper method
-		expect(pollingProvider).not.toContain("repairGap(");
-		expect(binanceProvider).not.toContain("repairGap(");
-
-		// Explanation: Phase C eliminated all provider-owned repairGap() wrappers.
-		// If this test fails, someone re-added a wrapper method.
-		// Gap repair must use the shared repairCandleGap() function directly.
-	});
-
-	it("should use shared repairCandleGap function in both providers", () => {
-		const marketDataDir = path.join(__dirname, "../marketData");
-		const pollingProvider = fs.readFileSync(
-			path.join(marketDataDir, "pollingMarketDataProvider.ts"),
-			"utf-8"
-		);
-		const binanceProvider = fs.readFileSync(
-			path.join(marketDataDir, "binanceUsdMMarketDataProvider.ts"),
-			"utf-8"
-		);
-
-		// Should import repairCandleGap from @agenai/data
-		expect(pollingProvider).toContain('from "@agenai/data"');
-		expect(pollingProvider).toContain("repairCandleGap");
-
-		expect(binanceProvider).toContain('from "@agenai/data"');
-		expect(binanceProvider).toContain("repairCandleGap");
-
-		// Should have at least one direct call to repairCandleGap(
-		expect(pollingProvider).toMatch(/await repairCandleGap\({/);
-		expect(binanceProvider).toMatch(/await repairCandleGap\({/);
-	});
+	// Phase C tests removed - legacy provider files deleted in Phase F
+	// Gap repair logic now verified via @agenai/data package tests
 
 	it("should have gap repair function in @agenai/data", async () => {
 		const dataModule = await import("@agenai/data");
@@ -352,5 +312,297 @@ describe("Holy Grail Phase F Guard Rails", () => {
 		if (usesPlant) {
 			expect(content).toContain("HG_PHASE_COMPLETED=A,B,C,D,E,F");
 		}
+	});
+});
+
+describe("Holy Grail Phase F Irreversible Guard Rails", () => {
+	it("should have REQUIRED (not optional) Phase F dependencies in StartTraderOptions", () => {
+		const startTraderPath = path.join(__dirname, "../startTrader.ts");
+		const startTrader = fs.readFileSync(startTraderPath, "utf-8");
+
+		// Phase F: Strict enforcement - these are REQUIRED (no '?')
+		expect(startTrader).toContain("baseCandleSource: BaseCandleSource");
+		expect(startTrader).toContain("marketDataClient: MarketDataClient");
+		expect(startTrader).toContain("executionProvider: ExecutionProvider");
+
+		// Must NOT have optional versions
+		expect(startTrader).not.toContain("baseCandleSource?: BaseCandleSource");
+		expect(startTrader).not.toContain("marketDataClient?: MarketDataClient");
+		expect(startTrader).not.toContain("executionProvider?: ExecutionProvider");
+	});
+
+	it("should have ZERO legacy Phase E provider references in startTrader", () => {
+		const startTraderPath = path.join(__dirname, "../startTrader.ts");
+		const startTrader = fs.readFileSync(startTraderPath, "utf-8");
+
+		// Phase F: NO legacy provider code allowed
+		expect(startTrader).not.toContain("MarketDataProvider");
+		expect(startTrader).not.toContain("marketDataProvider");
+		expect(startTrader).not.toContain("createFeed(");
+		expect(startTrader).not.toContain("bootstrapMarketData(");
+		expect(startTrader).not.toContain("pollIntervalMs");
+		expect(startTrader).not.toContain("DEFAULT_POLL_INTERVAL_MS");
+	});
+
+	it("should have BaseCandleSource implementations with NO orchestration imports", () => {
+		const binanceSourcePath = path.join(
+			__dirname,
+			"../marketData/BinanceBaseCandleSource.ts"
+		);
+		const pollingSourcePath = path.join(
+			__dirname,
+			"../marketData/PollingBaseCandleSource.ts"
+		);
+
+		const binanceSource = fs.readFileSync(binanceSourcePath, "utf-8");
+		const pollingSource = fs.readFileSync(pollingSourcePath, "utf-8");
+
+		// Phase F: BaseCandleSource implementations must NOT import orchestration utilities
+		// These are Plant's responsibility - check actual import statements
+		const forbiddenImports = [
+			'from "./aggregateCandles"',
+			'from "../data"',
+			"import { repairCandleGap",
+			"import { aggregateNewlyClosed",
+			"import { CandleStore",
+			"import { bucketTimestamp",
+		];
+
+		for (const forbidden of forbiddenImports) {
+			expect(binanceSource).not.toContain(forbidden);
+			expect(pollingSource).not.toContain(forbidden);
+		}
+
+		// Also check they don't actually use these functions (not just in comments)
+		expect(binanceSource).not.toMatch(/\brepairCandleGap\(/);
+		expect(binanceSource).not.toMatch(/\baggregateNewlyClosed\(/);
+		expect(binanceSource).not.toMatch(/\bnew CandleStore\(/);
+		expect(binanceSource).not.toMatch(/\bbucketTimestamp\(/);
+
+		expect(pollingSource).not.toMatch(/\brepairCandleGap\(/);
+		expect(pollingSource).not.toMatch(/\baggregateNewlyClosed\(/);
+		expect(pollingSource).not.toMatch(/\bnew CandleStore\(/);
+		expect(pollingSource).not.toMatch(/\bbucketTimestamp\(/);
+	});
+
+	it("should have runtimeShared with NO pollIntervalMs in StrategyLogContext", () => {
+		const runtimeSharedPath = path.join(__dirname, "../runtimeShared.ts");
+		const runtimeShared = fs.readFileSync(runtimeSharedPath, "utf-8");
+
+		// Phase F: pollIntervalMs removed from all logging contexts
+		// Check the StrategyLogContext interface definition
+		const interfaceMatch = runtimeShared.match(
+			/export interface StrategyLogContext \{[^}]+\}/s
+		);
+		if (interfaceMatch) {
+			expect(interfaceMatch[0]).not.toContain("pollIntervalMs");
+		}
+
+		// Check logStrategyLoaded function signature
+		const functionMatch = runtimeShared.match(
+			/export const logStrategyLoaded = \(\{[^}]+\}/s
+		);
+		if (functionMatch) {
+			expect(functionMatch[0]).not.toContain("pollIntervalMs");
+		}
+
+		// Check the function body doesn't reference pollIntervalMs
+		const logStrategyLoadedBody = runtimeShared.match(
+			/export const logStrategyLoaded[\s\S]*?runtimeLogger\.info\("strategy_loaded"[\s\S]*?\}\);/
+		);
+		if (logStrategyLoadedBody) {
+			expect(logStrategyLoadedBody[0]).not.toContain("pollIntervalMs");
+		}
+	});
+
+	it("should have backtestRunner with NO pollIntervalMs in logStrategyLoaded call", () => {
+		const backtestRunnerPath = path.join(
+			__dirname,
+			"../backtest/backtestRunner.ts"
+		);
+		const backtestRunner = fs.readFileSync(backtestRunnerPath, "utf-8");
+
+		// Phase F: pollIntervalMs removed from backtest logging
+		const logStrategyLoadedCalls = backtestRunner.match(
+			/logStrategyLoaded\(\{[\s\S]*?\}\)/g
+		);
+
+		if (logStrategyLoadedCalls) {
+			for (const call of logStrategyLoadedCalls) {
+				expect(call).not.toContain("pollIntervalMs");
+			}
+		}
+	});
+
+	it("should have TraderConfig interface with NO pollIntervalMs field", () => {
+		const startTraderPath = path.join(__dirname, "../startTrader.ts");
+		const startTrader = fs.readFileSync(startTraderPath, "utf-8");
+
+		// Phase F: TraderConfig should not have pollIntervalMs
+		const traderConfigMatch = startTrader.match(
+			/export interface TraderConfig \{[^}]+\}/s
+		);
+		if (traderConfigMatch) {
+			expect(traderConfigMatch[0]).not.toContain("pollIntervalMs");
+		}
+	});
+});
+
+/**
+ * Phase F Export Surface Guard Tests
+ * Ensures ZERO legacy provider types are exported
+ */
+describe("Phase F Export Surface Irreversibility", () => {
+	it("should have marketData/index.ts with NO legacy provider exports", () => {
+		const indexPath = path.join(__dirname, "../marketData/index.ts");
+		const content = fs.readFileSync(indexPath, "utf-8");
+
+		// Phase F: Only export Phase F types and implementations
+		expect(content).not.toContain('export * from "./types"');
+		expect(content).not.toContain("MarketDataProvider");
+		expect(content).not.toContain("PollingMarketDataProvider");
+		expect(content).not.toContain("BinanceUsdMMarketDataProvider");
+		expect(content).not.toContain("MarketDataFeed");
+		expect(content).not.toContain("MarketDataBootstrap");
+		expect(content).not.toContain("createFeed");
+		expect(content).not.toContain("bootstrap");
+
+		// Phase F: Must export only these
+		expect(content).toContain("ClosedCandleEvent");
+		expect(content).toContain("BaseCandleSource");
+		expect(content).toContain("BinanceBaseCandleSource");
+		expect(content).toContain("PollingBaseCandleSource");
+		expect(content).toContain("MarketDataPlant");
+	});
+
+	it("should have marketData/types.ts with NO legacy provider types", () => {
+		const typesPath = path.join(__dirname, "../marketData/types.ts");
+		const content = fs.readFileSync(typesPath, "utf-8");
+
+		// Phase F: Only Phase F types allowed
+		expect(content).not.toContain("MarketDataProvider");
+		expect(content).not.toContain("PollingMarketDataProvider");
+		expect(content).not.toContain("BinanceUsdMMarketDataProvider");
+		expect(content).not.toContain("MarketDataFeed");
+		expect(content).not.toContain("MarketDataBootstrap");
+		expect(content).not.toContain("SubscribeOptions");
+		expect(content).not.toContain("PollOptions");
+		expect(content).not.toContain("pollIntervalMs");
+
+		// Phase F: Must have only these
+		expect(content).toContain("ClosedCandleEvent");
+		expect(content).toContain("ClosedCandleHandler");
+		expect(content).toContain("BaseCandleSource");
+	});
+
+	it("should have app-di with NO createMarketDataProvider export", () => {
+		// Check app-di package exists
+		const appDiIndexPath = path.resolve(
+			__dirname,
+			"../../../../apps/app-di/src/index.ts"
+		);
+
+		if (!fs.existsSync(appDiIndexPath)) {
+			// app-di might not exist in all environments, skip gracefully
+			return;
+		}
+
+		const content = fs.readFileSync(appDiIndexPath, "utf-8");
+
+		// Phase F: No legacy createMarketDataProvider export
+		expect(content).not.toContain("createMarketDataProvider");
+
+		// Phase F: Only createBaseCandleSource and createMarketDataClient
+		expect(content).toContain("createBaseCandleSource");
+		expect(content).toContain("createMarketDataClient");
+
+		// Backtest still needs createDataProvider
+		expect(content).toContain("createDataProvider");
+	});
+
+	it("should have app-di/createDataProvider.ts with NO commented legacy code", () => {
+		const createProviderPath = path.resolve(
+			__dirname,
+			"../../../../apps/app-di/src/createDataProvider.ts"
+		);
+
+		if (!fs.existsSync(createProviderPath)) {
+			return;
+		}
+
+		const content = fs.readFileSync(createProviderPath, "utf-8");
+
+		// Phase F: All commented legacy code must be deleted
+		expect(content).not.toContain("Phase E legacy");
+		expect(content).not.toContain("DEPRECATED");
+		expect(content).not.toContain("// const isBinanceVenue");
+		expect(content).not.toContain("// export const createMarketDataProvider");
+		expect(content).not.toContain("BinanceUsdMMarketDataProvider");
+		expect(content).not.toContain("PollingMarketDataProvider");
+		expect(content).not.toContain("pollIntervalMs");
+
+		// Phase F: Only clean createDataProvider allowed
+		expect(content).toContain("createDataProvider");
+		expect(content).toContain("DefaultDataProvider");
+	});
+
+	it("should have app-di tests with NO legacy provider mocks", () => {
+		const diTestPath = path.resolve(
+			__dirname,
+			"../../../../apps/app-di/src/di.test.ts"
+		);
+
+		if (!fs.existsSync(diTestPath)) {
+			return;
+		}
+
+		const content = fs.readFileSync(diTestPath, "utf-8");
+
+		// Phase F: No legacy provider mocks
+		expect(content).not.toContain("MockPollingMarketDataProvider");
+		expect(content).not.toContain("MockBinanceUsdMMarketDataProvider");
+		expect(content).not.toContain("createMarketDataProvider");
+		expect(content).not.toContain("Phase E legacy");
+
+		// Phase F: Only Phase F DI functions
+		expect(content).toContain("createDataProvider");
+		expect(content).toContain("createExecutionProvider");
+		expect(content).toContain("createBacktestExecution");
+	});
+
+	it("should have NO legacy provider files remaining in marketData", () => {
+		const marketDataDir = path.join(__dirname, "../marketData");
+
+		// Phase F: Legacy provider files must be DELETED, not just isolated
+		const binanceProviderPath = path.join(
+			marketDataDir,
+			"binanceUsdMMarketDataProvider.ts"
+		);
+		const pollingProviderPath = path.join(
+			marketDataDir,
+			"pollingMarketDataProvider.ts"
+		);
+
+		expect(
+			fs.existsSync(binanceProviderPath),
+			"binanceUsdMMarketDataProvider.ts should be deleted"
+		).toBe(false);
+		expect(
+			fs.existsSync(pollingProviderPath),
+			"pollingMarketDataProvider.ts should be deleted"
+		).toBe(false);
+	});
+
+	it("should have NO legacy provider references in runtime barrel exports", () => {
+		const runtimeIndexPath = path.join(__dirname, "../index.ts");
+		const content = fs.readFileSync(runtimeIndexPath, "utf-8");
+
+		// Phase F: Runtime should not export any legacy provider types/classes
+		expect(content).not.toContain("binanceUsdMMarketDataProvider");
+		expect(content).not.toContain("pollingMarketDataProvider");
+		expect(content).not.toContain("BinanceUsdMMarketDataProvider");
+		expect(content).not.toContain("PollingMarketDataProvider");
+		expect(content).not.toContain("MarketDataProvider");
+		expect(content).not.toContain("MarketDataFeed");
 	});
 });
