@@ -9,6 +9,7 @@ import {
 	StrategyId,
 	TradeIntent,
 	getStrategyDefinition,
+	timeframeToMs,
 } from "@agenai/core";
 import type { ExecutionClient } from "@agenai/core";
 import {
@@ -49,11 +50,15 @@ import {
 	BacktestResolvedConfig,
 	BacktestResult,
 	BacktestTrade,
+	EquitySnapshot,
 } from "./backtestTypes";
 import { buildRuntimeFingerprintLogPayload } from "../runtimeFingerprint";
 import type { ExecutionProvider } from "../execution/executionProvider";
 import { runTick } from "../loop/runTick";
 import { buildTickSnapshot } from "../loop/buildTickSnapshot";
+import { BacktestBaseCandleSource } from "../marketData/BacktestBaseCandleSource";
+import { MarketDataPlant } from "../marketData/MarketDataPlant";
+import type { ClosedCandleEvent } from "../marketData/types";
 
 class BacktestExecutionProvider implements ExecutionProvider {
 	readonly venue = "backtest";
@@ -241,13 +246,6 @@ export const runBacktest = async (
 		effectiveConfig.startTimestamp
 	);
 
-	const executionSeries = timeframeSeries.find(
-		(series) => series.timeframe === timeframe
-	);
-	if (!executionSeries || executionSeries.candles.length === 0) {
-		throw new Error("No candles loaded for execution timeframe");
-	}
-
 	const runtime = await createRuntime(runtimeSnapshot, {
 		strategyOverride: options.strategyOverride,
 		builder: async () =>
@@ -298,33 +296,135 @@ export const runBacktest = async (
 	});
 	logRiskConfig(agenaiConfig.risk);
 
-	const indexByTimeframe = new Map<string, number>();
-	for (const tf of trackedTimeframes) {
-		indexByTimeframe.set(tf, 0);
+	// Phase G: Plant-driven backtest architecture
+	// Select base timeframe intelligently:
+	// - If execution timeframe data is provided, use it (no unwanted aggregation)
+	// - Otherwise, fallback to smallest interval among signal timeframes
+	const executionSeries = timeframeSeries.find(
+		(series) => series.timeframe === timeframe
+	);
+	const hasExecutionSeries =
+		executionSeries && executionSeries.candles.length > 0;
+
+	let baseTimeframe: string;
+	let baseCandles: Candle[];
+	let baseTimeframeReason: string;
+
+	if (hasExecutionSeries) {
+		// Use execution timeframe as base - ensures we tick on every execution candle
+		baseTimeframe = timeframe;
+		baseCandles = executionSeries.candles;
+		baseTimeframeReason = "execution_timeframe_provided";
+	} else {
+		// Fallback to smallest timeframe (original logic)
+		baseTimeframe = selectBaseTimeframe(trackedTimeframes);
+		baseCandles =
+			timeframeSeries.find((s) => s.timeframe === baseTimeframe)?.candles ?? [];
+		baseTimeframeReason = "fallback_smallest_timeframe";
 	}
 
+	const baseTfMs = timeframeToMs(baseTimeframe);
+
+	if (baseCandles.length === 0) {
+		throw new Error(
+			`No candles loaded for base timeframe ${baseTimeframe}. Cannot run backtest.`
+		);
+	}
+
+	runtimeLogger.info("backtest_base_timeframe_selected", {
+		baseTimeframe,
+		executionTimeframe: timeframe,
+		reason: baseTimeframeReason,
+		baseCandleCount: baseCandles.length,
+	});
+
+	// Filter base candles to window - include candles UP TO endTimestamp
+	const windowedBaseCandles = baseCandles.filter(
+		(c) => c.timestamp <= effectiveConfig.endTimestamp
+	);
+
+	// Pre-populate store with HIGHER timeframe data (not base TF) for warmup/history
+	// Base timeframe will be populated incrementally by Plant to maintain runtime parity
+	runtimeLogger.info("backtest_prepopulating_store", {
+		timeframes: timeframeSeries
+			.filter((s) => s.timeframe !== baseTimeframe)
+			.map((s) => ({ tf: s.timeframe, count: s.candles.length })),
+	});
+	for (const { timeframe: tf, candles } of timeframeSeries) {
+		// Skip base timeframe - will be populated incrementally by Plant
+		if (tf === baseTimeframe) {
+			continue;
+		}
+
+		for (const candle of candles) {
+			// Only add candles at or before the last base candle timestamp
+			if (
+				candle.timestamp <=
+				windowedBaseCandles[windowedBaseCandles.length - 1]?.timestamp
+			) {
+				candleStore.ingest(tf, candle);
+			}
+		}
+	}
+
+	runtimeLogger.info("backtest_plant_config", {
+		baseTimeframe,
+		baseTimeframeMs: baseTfMs,
+		totalBaseCandles: baseCandles.length,
+		windowedBaseCandles: windowedBaseCandles.length,
+		signalTimeframes: trackedTimeframes,
+		executionTimeframe: timeframe,
+	});
+
+	// Create dummy marketDataClient for backtest (should not be called)
+	const dummyMarketDataClient: MarketDataClient = {
+		fetchOHLCV: async () => {
+			throw new Error(
+				"BacktestBaseCandleSource does not support fetchOHLCV - all data pre-loaded"
+			);
+		},
+	};
+
+	// Create BacktestBaseCandleSource with base candles
+	const backtestSource = new BacktestBaseCandleSource({
+		venue: "backtest",
+		symbol,
+		timeframe: baseTimeframe,
+		candles: windowedBaseCandles,
+		logger: runtimeLogger,
+	});
+
+	// Create MarketDataPlant with gap repair disabled
+	const plant = new MarketDataPlant({
+		venue: "backtest",
+		symbol,
+		marketDataClient: options.marketDataClient ?? dummyMarketDataClient,
+		candleStore,
+		source: backtestSource,
+		enableGapRepair: false, // Backtest data is contiguous
+		logger: runtimeLogger,
+	});
+
 	const trades: BacktestTrade[] = [];
-	const equitySnapshots: PaperAccountSnapshot[] = [];
+	const equitySnapshots: EquitySnapshot[] = [];
 	const decisionContext = createDecisionContext(venues, timeframe);
 	let fallbackEquity = initialBalance;
+	let lastExecutionTimestamp = 0;
 
-	for (const candle of executionSeries.candles) {
-		updateCacheUntilTimestamp(
-			timeframeSeries,
-			candleStore,
-			indexByTimeframe,
-			candle.timestamp
-		);
-
-		// Skip strategy execution for warmup candles before startTimestamp
-		if (candle.timestamp < effectiveConfig.startTimestamp) {
-			continue;
+	// Subscribe to plant candle events
+	const unsubscribe = plant.onCandle(async (event: ClosedCandleEvent) => {
+		// Only process execution timeframe events
+		if (event.timeframe !== timeframe) {
+			return;
 		}
 
-		const buffer = candleStore.getSeries(timeframe);
-		if (!buffer.length) {
-			continue;
+		// Skip warmup candles (before startTimestamp) - they build history but don't execute strategy
+		if (event.candle.timestamp < effectiveConfig.startTimestamp) {
+			return;
 		}
+
+		// Track last execution timestamp for final snapshot
+		lastExecutionTimestamp = event.candle.timestamp;
 
 		// Build multi-timeframe series from CandleStore
 		const series: Record<string, Candle[]> = {};
@@ -335,18 +435,23 @@ export const runBacktest = async (
 			}
 		}
 
+		// Skip if no series data available
+		if (Object.keys(series).length === 0) {
+			return;
+		}
+
 		// Build snapshot
 		const snapshot = buildTickSnapshot({
 			symbol,
 			signalVenue: venues.signalVenue,
 			executionTimeframe: timeframe,
-			executionCandle: candle,
+			executionCandle: event.candle,
 			series,
 		});
 
 		const recordHook = createExecutionRecorder(
 			trades,
-			candle,
+			event.candle,
 			executionProvider.getPosition(symbol)
 		);
 
@@ -364,9 +469,34 @@ export const runBacktest = async (
 		});
 
 		fallbackEquity = tickResult.updatedEquity;
-		if (tickResult.accountSnapshot) {
-			equitySnapshots.push(tickResult.accountSnapshot);
-		}
+
+		// Record equity snapshot after each execution tick
+		equitySnapshots.push({
+			timestamp: event.candle.timestamp,
+			equity: fallbackEquity,
+		});
+	});
+
+	// Start plant - handlers are awaited by Plant.emitEvent() sequentially
+	await plant.start({
+		timeframes: trackedTimeframes,
+		executionTimeframe: timeframe,
+		historyLimit: 0, // No bootstrap needed - data already in CandleStore
+	});
+
+	// Cleanup
+	unsubscribe();
+	await plant.stop();
+
+	// Add final equity snapshot if we executed any ticks
+	if (lastExecutionTimestamp > 0 && equitySnapshots.length > 0) {
+		// Final snapshot already added after last tick, no need to duplicate
+	} else if (lastExecutionTimestamp > 0) {
+		// No snapshots were added (shouldn't happen), add final one
+		equitySnapshots.push({
+			timestamp: lastExecutionTimestamp,
+			equity: fallbackEquity,
+		});
 	}
 
 	const completedTrades = trades.filter(
@@ -375,7 +505,7 @@ export const runBacktest = async (
 	runtimeLogger.info("backtest_summary", {
 		symbol,
 		timeframe,
-		totalCandles: executionSeries.candles.length,
+		totalCandles: windowedBaseCandles.length,
 		totalTrades: completedTrades,
 		totalExecutions: trades.length,
 		finalEquity:
@@ -463,27 +593,26 @@ const buildProvidedSeries = (
 	});
 };
 
-const updateCacheUntilTimestamp = (
-	series: TimeframeSeries[],
-	store: CandleStore,
-	indices: Map<string, number>,
-	timestamp: number
-): void => {
-	for (const frame of series) {
-		let pointer = indices.get(frame.timeframe) ?? 0;
-		const pending: Candle[] = [];
-		while (
-			pointer < frame.candles.length &&
-			frame.candles[pointer].timestamp <= timestamp
-		) {
-			pending.push(frame.candles[pointer]);
-			pointer += 1;
-		}
-		if (pending.length) {
-			store.ingestMany(frame.timeframe, pending);
-		}
-		indices.set(frame.timeframe, pointer);
+/**
+ * Select base timeframe (smallest interval among requested timeframes)
+ */
+const selectBaseTimeframe = (timeframes: string[]): string => {
+	if (timeframes.length === 0) {
+		throw new Error("At least one timeframe must be requested");
 	}
+
+	let baseTf = timeframes[0];
+	let baseMs = timeframeToMs(baseTf);
+
+	for (const tf of timeframes) {
+		const ms = timeframeToMs(tf);
+		if (ms < baseMs) {
+			baseMs = ms;
+			baseTf = tf;
+		}
+	}
+
+	return baseTf;
 };
 
 const createBacktestStrategy = async (

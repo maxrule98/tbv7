@@ -1,5 +1,6 @@
 import { StrategyId } from "@agenai/core";
-import { PaperAccountSnapshot } from "@agenai/execution-engine";
+
+export type EquitySnapshot = { timestamp: number; equity: number };
 
 export interface BacktestConfig {
 	symbol?: string;
@@ -35,5 +36,5 @@ export interface BacktestTrade {
 export interface BacktestResult {
 	config: BacktestResolvedConfig;
 	trades: BacktestTrade[];
-	equitySnapshots: PaperAccountSnapshot[];
+	equitySnapshots: EquitySnapshot[];
 }

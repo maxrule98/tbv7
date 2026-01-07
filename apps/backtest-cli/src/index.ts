@@ -217,7 +217,7 @@ const main = async (): Promise<void> => {
 	const lastSnapshot =
 		result.equitySnapshots[result.equitySnapshots.length - 1];
 	const startingBalance =
-		firstSnapshot?.startingBalance ?? backtestConfig.initialBalance;
+		firstSnapshot?.equity ?? backtestConfig.initialBalance;
 	const finalEquity = lastSnapshot?.equity ?? startingBalance;
 	const totalPnl =
 		typeof startingBalance === "number" && typeof finalEquity === "number"

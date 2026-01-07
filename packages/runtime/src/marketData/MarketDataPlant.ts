@@ -14,6 +14,7 @@ export interface MarketDataPlantOptions {
 	marketDataClient: MarketDataClient;
 	candleStore: CandleStore;
 	source: BaseCandleSource;
+	enableGapRepair?: boolean; // Default true; set false for backtest with contiguous data
 	logger?: {
 		info(event: string, payload?: Record<string, unknown>): void;
 		warn(event: string, payload?: Record<string, unknown>): void;
@@ -57,6 +58,7 @@ export class MarketDataPlant {
 	private executionTimeframe: string | null = null;
 	private lastBaseTsMs = 0;
 	private isRunning = false;
+	private readonly enableGapRepair: boolean;
 
 	constructor(options: MarketDataPlantOptions) {
 		this.venue = options.venue;
@@ -64,6 +66,7 @@ export class MarketDataPlant {
 		this.marketDataClient = options.marketDataClient;
 		this.candleStore = options.candleStore;
 		this.source = options.source;
+		this.enableGapRepair = options.enableGapRepair ?? true;
 		this.logger = options.logger ?? {
 			info: () => {},
 			warn: () => {},
@@ -92,10 +95,13 @@ export class MarketDataPlant {
 			requestedTimeframes: this.requestedTimeframes,
 			executionTimeframe: this.executionTimeframe,
 			historyLimit: options.historyLimit,
+			enableGapRepair: this.enableGapRepair,
 		});
 
-		// Bootstrap base timeframe history
-		await this.bootstrapHistory(this.baseTimeframe, options.historyLimit);
+		// Bootstrap base timeframe history (skip if historyLimit is 0, e.g., backtest)
+		if (options.historyLimit > 0) {
+			await this.bootstrapHistory(this.baseTimeframe, options.historyLimit);
+		}
 
 		// Start base candle source
 		this.isRunning = true;
@@ -202,7 +208,7 @@ export class MarketDataPlant {
 	 */
 	private async processBaseCandle(
 		candle: Candle,
-		meta: { receivedAt: number; source: "ws" | "poll" | "rest" }
+		meta: { receivedAt: number; source: "ws" | "poll" | "rest" | "backtest" }
 	): Promise<void> {
 		if (!this.baseTimeframe) {
 			return;
@@ -210,8 +216,12 @@ export class MarketDataPlant {
 
 		const baseTfMs = timeframeToMs(this.baseTimeframe);
 
-		// Detect and repair gaps
-		if (this.lastBaseTsMs >= 0 && candle.timestamp > this.lastBaseTsMs) {
+		// Detect and repair gaps (skip if disabled for backtest)
+		if (
+			this.enableGapRepair &&
+			this.lastBaseTsMs >= 0 &&
+			candle.timestamp > this.lastBaseTsMs
+		) {
 			const expectedNext = this.lastBaseTsMs + baseTfMs;
 			if (candle.timestamp > expectedNext) {
 				await this.repairGap(expectedNext, candle.timestamp);

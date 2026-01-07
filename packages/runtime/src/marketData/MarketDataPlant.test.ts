@@ -299,4 +299,65 @@ describe("MarketDataPlant", () => {
 		// Should stop without throwing
 		expect(plant).toBeDefined();
 	});
+
+	it("should NOT call repairCandleGap when enableGapRepair=false", async () => {
+		const mockHistory = [buildCandle(0, 100, 102, 99, 101, 10)];
+
+		(mockClient.fetchOHLCV as ReturnType<typeof vi.fn>).mockImplementation(
+			async (sym: string, tf: string, limit: number, since?: number) => {
+				if (since !== undefined) {
+					// Gap repair fetch - should NOT be called when enableGapRepair=false
+					return [
+						buildCandle(60_000, 101, 103, 100, 102, 15),
+						buildCandle(120_000, 102, 105, 101, 104, 20),
+					];
+				} else {
+					// Bootstrap
+					return mockHistory;
+				}
+			}
+		);
+
+		plant = new MarketDataPlant({
+			venue,
+			symbol,
+			marketDataClient: mockClient,
+			candleStore,
+			source: mockSource,
+			enableGapRepair: false, // Disable gap repair
+		});
+
+		plant.onCandle((event) => {
+			emittedEvents.push(event);
+		});
+
+		await plant.start({
+			timeframes: ["1m"],
+			executionTimeframe: "1m",
+			historyLimit: 100,
+		});
+
+		// Emit candle with gap (missing 60_000, 120_000)
+		mockSource.emit(buildCandle(180_000, 104, 106, 103, 105, 25));
+
+		// Wait for async processing
+		await new Promise((resolve) => setTimeout(resolve, 50));
+
+		await plant.stop();
+
+		// Should NOT have called fetchOHLCV with since parameter (gap repair)
+		const allCalls = (mockClient.fetchOHLCV as ReturnType<typeof vi.fn>).mock
+			.calls;
+		const gapRepairCalls = allCalls.filter(
+			(call) => call[3] !== undefined && call[3] >= 60_000
+		);
+		expect(gapRepairCalls.length).toBe(0);
+
+		// Should still emit the base candle at 0ms from bootstrap + the 180_000 candle
+		// (no repair candles emitted)
+		const candleTimestamps = emittedEvents.map((e) => e.candle.timestamp);
+		expect(candleTimestamps).toContain(180_000);
+		expect(candleTimestamps).not.toContain(60_000);
+		expect(candleTimestamps).not.toContain(120_000);
+	});
 });

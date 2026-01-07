@@ -606,3 +606,100 @@ describe("Phase F Export Surface Irreversibility", () => {
 		expect(content).not.toContain("MarketDataFeed");
 	});
 });
+
+describe("Holy Grail Phase G Guard Rails", () => {
+	it("should have BacktestBaseCandleSource implementation", () => {
+		const backtestSourcePath = path.join(
+			__dirname,
+			"../marketData/BacktestBaseCandleSource.ts"
+		);
+		expect(
+			fs.existsSync(backtestSourcePath),
+			"BacktestBaseCandleSource.ts should exist"
+		).toBe(true);
+
+		const backtestSource = fs.readFileSync(backtestSourcePath, "utf-8");
+		expect(backtestSource).toContain("implements BaseCandleSource");
+		expect(backtestSource).toContain("export class BacktestBaseCandleSource");
+	});
+
+	it("should have backtestRunner use MarketDataPlant and BacktestBaseCandleSource", () => {
+		const backtestRunnerPath = path.join(
+			__dirname,
+			"../backtest/backtestRunner.ts"
+		);
+		const backtestRunner = fs.readFileSync(backtestRunnerPath, "utf-8");
+
+		// Phase G: backtestRunner must use Plant-driven architecture
+		expect(backtestRunner).toContain("MarketDataPlant");
+		expect(backtestRunner).toContain("BacktestBaseCandleSource");
+		expect(backtestRunner).toContain("new MarketDataPlant");
+		expect(backtestRunner).toContain("new BacktestBaseCandleSource");
+		expect(backtestRunner).toContain("plant.start");
+		expect(backtestRunner).toContain("plant.onCandle");
+	});
+
+	it("should NOT have legacy provider concepts in backtestRunner", () => {
+		const backtestRunnerPath = path.join(
+			__dirname,
+			"../backtest/backtestRunner.ts"
+		);
+		const backtestRunner = fs.readFileSync(backtestRunnerPath, "utf-8");
+
+		// Phase G: No legacy provider patterns
+		expect(backtestRunner).not.toContain("MarketDataProvider");
+		expect(backtestRunner).not.toContain("createFeed");
+		expect(backtestRunner).not.toContain("bootstrapMarketData");
+		// Old manual loop pattern should be replaced by Plant event-driven
+		expect(backtestRunner).not.toContain(
+			"for (const candle of executionSeries.candles)"
+		);
+	});
+
+	it("should have MarketDataPlant.enableGapRepair flag with default true", () => {
+		const plantPath = path.join(__dirname, "../marketData/MarketDataPlant.ts");
+		const plant = fs.readFileSync(plantPath, "utf-8");
+
+		// Phase G: enableGapRepair flag in options interface
+		expect(plant).toContain("enableGapRepair?: boolean");
+		// Should have default true comment
+		expect(plant).toContain("Default true");
+		// Should use the flag in processBaseCandle
+		expect(plant).toContain("this.enableGapRepair");
+		expect(plant).toContain("if (");
+		expect(plant).toMatch(/if\s*\([^)]*this\.enableGapRepair/);
+	});
+
+	it("should have backtestRunner set enableGapRepair=false for Plant", () => {
+		const backtestRunnerPath = path.join(
+			__dirname,
+			"../backtest/backtestRunner.ts"
+		);
+		const backtestRunner = fs.readFileSync(backtestRunnerPath, "utf-8");
+
+		// Phase G: Backtest should disable gap repair (data is contiguous)
+		expect(backtestRunner).toContain("enableGapRepair: false");
+	});
+
+	it("should confirm HG_PHASE_COMPLETED=A,B,C,D,E,F,G marker exists when Phase G is complete", () => {
+		const progressPath = path.join(
+			__dirname,
+			"../marketData/HOLY_GRAIL_PROGRESS.md"
+		);
+		const content = fs.readFileSync(progressPath, "utf-8");
+
+		// Check that backtestRunner uses Plant-driven architecture
+		const backtestRunnerPath = path.join(
+			__dirname,
+			"../backtest/backtestRunner.ts"
+		);
+		const backtestRunner = fs.readFileSync(backtestRunnerPath, "utf-8");
+		const usesPlant =
+			backtestRunner.includes("new MarketDataPlant") &&
+			backtestRunner.includes("new BacktestBaseCandleSource");
+
+		if (usesPlant) {
+			expect(content).toContain("HG_PHASE_COMPLETED=A,B,C,D,E,F,G");
+		}
+	});
+});

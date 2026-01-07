@@ -3,7 +3,7 @@
 **Machine-Searchable Marker:**
 
 ```
-HG_PHASE_COMPLETED=A,B,C,D,E,F
+HG_PHASE_COMPLETED=A,B,C,D,E,F,G
 ```
 
 ## Phase Checklist

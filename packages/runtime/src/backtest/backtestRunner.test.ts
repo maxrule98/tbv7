@@ -242,7 +242,7 @@ describe("runBacktest", () => {
 				executionClient,
 				timeframeData: { "5m": [] },
 			})
-		).rejects.toThrow("No candles loaded for execution timeframe");
+		).rejects.toThrow("No candles loaded for base timeframe");
 	});
 
 	it("emits diagnostics for the ultra strategy when debug mode is enabled", async () => {

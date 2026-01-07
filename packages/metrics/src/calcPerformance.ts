@@ -45,10 +45,7 @@ export const calculatePerformance = (
 
 	const startingSnapshot = result.equitySnapshots[0];
 	const initialBalance =
-		startingSnapshot?.startingBalance ??
-		startingSnapshot?.equity ??
-		config.initialBalance ??
-		1000;
+		startingSnapshot?.equity ?? config.initialBalance ?? 1000;
 	const riskUnitUsd = Math.max(
 		options.riskUnitUsd ?? initialBalance * (options.defaultRiskPct ?? 0.01),
 		1

@@ -7,6 +7,7 @@ export type {
 
 export { BinanceBaseCandleSource } from "./BinanceBaseCandleSource";
 export { PollingBaseCandleSource } from "./PollingBaseCandleSource";
+export { BacktestBaseCandleSource } from "./BacktestBaseCandleSource";
 export { MarketDataPlant } from "./MarketDataPlant";
 
 // Aggregation utilities (used by Plant and tests)

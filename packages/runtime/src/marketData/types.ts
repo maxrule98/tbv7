@@ -13,7 +13,7 @@ export interface ClosedCandleEvent {
 	candle: Candle;
 	arrivalDelayMs: number;
 	gapFilled?: boolean;
-	source: "ws" | "rest" | "poll";
+	source: "ws" | "rest" | "poll" | "backtest";
 }
 
 export type ClosedCandleHandler = (
@@ -41,7 +41,10 @@ export interface BaseCandleSource {
 		timeframe: string;
 		onCandle: (
 			candle: Candle,
-			meta: { receivedAt: number; source: "ws" | "poll" | "rest" }
+			meta: {
+				receivedAt: number;
+				source: "ws" | "poll" | "rest" | "backtest";
+			}
 		) => void;
 	}): Promise<void>;
 
